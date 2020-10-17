@@ -16,47 +16,61 @@ namespace EternalLandPlugin
             return args == null ? DbExt.QueryReader(TShock.DB, sql) : DbExt.QueryReader(TShock.DB, sql, args);
         }
 
-        public static bool AddEPlayer(int id)
+        public static bool AddEPlayer(int id, string name)
         {
-            return RunSql($"INSERT INTO EternalLand (ID) VALUE (@0)", new object[]
+            Log.Info($"向数据库中添加玩家 {name}");
+            if (Utils.GetTSPlayerFuzzy(name, out List<TSPlayer> list))
+            {
+                EternalLand.EPlayers[list[0].Index] = new EPlayer { ID = id, Name = name };
+            }
+            return RunSql($"INSERT INTO EternalLand (ID,Name) VALUE (@0,@1)", new object[]
             {
                 id,
+                name
             }).Read();
         }
 
-        public static EPlayer GetEPlayer(int id)
+        public static async Task<EPlayer> GetEPlayer(int id)
         {
-            var reader = RunSql($"SELECT * FROM EternalLand WHERE ID={id}");
-            if (reader.Read())
+            return await Task.Run(() =>
             {
-                return new EPlayer
+                var reader = RunSql($"SELECT * FROM EternalLand WHERE ID={id}");
+                if (reader.Read())
                 {
-                    ID = reader.Get<int>("ID"),
-                    Money = reader.Get<long>("Money")
-                };
-            }
-            return null;
+                    return new EPlayer
+                    {
+                        ID = reader.Get<int>("ID"),
+                        Name = reader.Get<string>("Name"),
+                        Money = reader.Get<long>("Money")
+                    };
+                }
+                return null;
+            });
         }
 
-        public static bool SaveEPlayer(EPlayer eplr)
+        public static async Task SaveEPlayer(EPlayer eplr)
         {
-            var reader = RunSql($"UPDATE EternalLand SET Money=@1 WHERE ID = @0", new object[]
+            Task.Run(() =>
             {
+                var reader = RunSql($"UPDATE EternalLand SET Money=@1 WHERE ID = @0", new object[]
+                  {
                 eplr.ID,
                 eplr.Money
+                  });
             });
-            if (reader.Read()) return true;
-            return false;
         }
 
-        public static void SaveAllEPlayer()
+        public static async void SaveAllEPlayer()
         {
-            EternalLand.EPlayers.ForEach(eplr =>
+            await Task.Run(() =>
             {
-                if (eplr != null)
+                EternalLand.EPlayers.ForEach(eplr =>
                 {
-                    SaveEPlayer(eplr);
-                }
+                    if (eplr != null)
+                    {
+                        SaveEPlayer(eplr);
+                    }
+                });
             });
         }
 

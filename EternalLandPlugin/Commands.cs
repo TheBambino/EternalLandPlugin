@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using EternalLandPlugin.Account;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -25,19 +26,123 @@ namespace EternalLandPlugin
                 {
                     case "pay":
                     case "给":
-                        if (cmd.Count >= 3 && long.TryParse(cmd[2], out long value))
+                        long value = -1;
+                        if (cmd.Count < 3 || long.TryParse(cmd[2], out value))
                         {
-
+                            if (Utils.GetTSPlayerFuzzy(cmd[1], out List<TSPlayer> list))
+                            {
+                                var receive = list[0];
+                                if (cmd[1] == tsp.Name)
+                                {
+                                    tsp.SendErrorEX("请勿转给自己.");
+                                }
+                                else if (receive.Account == null)
+                                {
+                                    tsp.SendErrorEX("该玩家尚未注册.");
+                                }
+                                else if(!eplr.TakeMoney(value, $"<转给玩家: {receive.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48)))
+                                {
+                                    tsp.SendErrorEX($"资产不足. 当前你的账户中还剩余 {eplr.Money.ToColorful()}.");
+                                }
+                                else
+                                {
+                                    receive.EPlayer().GiveMoney(value, $"<来自玩家 {eplr.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48));
+                                    tsp.SendSuccessEX($"成功向玩家 {receive.Name.ToColorful()} 支付 {value.ToColorful()}. 当前余额: {eplr.Money.ToColorful()}.");
+                                    receive.SendSuccessEX($"玩家 {tsp.Name.ToColorful()} 向你支付 {value.ToColorful()}. 当前余额: {receive.EPlayer().Money.ToColorful()}.");
+                                    Log.Info($"玩家 {tsp.Name} 向 {receive.Name} 支付 {value}.");
+                                }
+                            }
+                            else
+                            {
+                                tsp.SendErrorEX($"未找到名称中含有 {cmd[1].ToColorful()} 的玩家.");
+                            }
                         }
                         else
                         {
-                            tsp.SendErrorEX("格式错误. /bank pay <玩家名> <支付金额>");
+                            tsp.SendErrorEX("格式错误. /bank pay <玩家名> <支付金额>.");
                         }
+                        break;
+                    case "bal":
+                    case "余额":
+                        if (cmd.Count >= 2)
+                        {
+                            if (tsp.HasPermission("eternalland.admin"))
+                            {
+                                if (Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer e))
+                                {
+                                    tsp.SendEX($"玩家 {e.Name.ToColorful()} 账户中的资产为 {tsp.EPlayer().Money.ToColorful()}");
+                                }
+                                else
+                                {
+                                    tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
+                                }
+                            }
+                            else
+                            {
+                                tsp.SendErrorEX($"你没有权限使用此命令.");
+                            }
+                        }
+                        tsp.SendEX($"当前你账户中的资产为 [c/8DF9D8:{tsp.EPlayer().Money.ToColorful()}]");
+                        break;
+                    case "take":
+                    case "t":
+                        if (cmd.Count < 3)
+                        {
+                            tsp.SendErrorEX("格式错误. /bank take <玩家名> <数额>.");
+                            return;
+                        }
+                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer give_eplr))
+                        {
+                            tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
+                            return;
+                        }
+                        else if (!long.TryParse(cmd[2], out long give_num))
+                        {
+                            tsp.SendErrorEX("格式错误. /bank take <玩家名> <数额>.");
+                            return;
+                        }
+                        else if (!give_eplr.TakeMoney(give_num, "<管理员取走>", new Microsoft.Xna.Framework.Color(155,56,48)))
+                        {
+                            tsp.SendErrorEX($"玩家 {give_eplr.Name.ToColorful()} 当前资产仅有 {give_eplr.Money.ToColorful()}.");
+                            return;
+                        }
+                        else
+                        {
+                            tsp.SendSuccessEX($"成功从玩家 {give_eplr.Name.ToColorful()} 的账户中取走 {give_num.ToColorful()}, 当前剩余 {give_eplr.Money.ToColorful()}");
+                        }
+                        break;
+                    case "give":
+                    case "g":
+                        if (cmd.Count < 3)
+                        {
+                            tsp.SendErrorEX("格式错误. /bank give <玩家名> <数额>.");
+                            return;
+                        }
+                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer give_eplr))
+                        {
+                            tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
+                            return;
+                        }
+                        else if (!long.TryParse(cmd[2], out long give_num))
+                        {
+                            tsp.SendErrorEX("格式错误. /bank give <玩家名> <数额>.");
+                            return;
+                        }
+                        else
+                        {
+                            give_eplr.GiveMoney(give_num, "<管理员给予>", new Microsoft.Xna.Framework.Color(155, 56, 48));
+                            tsp.SendSuccessEX($"成功给予玩家 {give_eplr.Name.ToColorful()} {give_num.ToColorful()} 资产, 当前共有 {give_eplr.Money.ToColorful()}.");
+                        }
+                        break;
+                    case "help":
+                    default:
+                        tsp.SendEX($"{(cmd[0] == "help" ? "" : "无效的命令.\n")}当前可用命令:\n/bank pay <玩家名> <数额> -- 向指定玩家转账.\n/bank bal -- 查询自己的余额.{(tsp.HasPermission("eternalland.admin") ? " -- 管理员命令 -- \n/bank give|take <玩家名> <数额> -- 给予或取走玩家的资产." : "")}");
+                        break;
                 }
             }
             else
             {
-                tsp.SendEX($"当前你的账户资产为 {eplr.Money}");
+                tsp.SendEX($"当前你的账户资产为 {eplr.Money.ToColorful()}.");
             }
         }
     }

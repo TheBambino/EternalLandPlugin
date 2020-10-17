@@ -47,7 +47,7 @@ namespace EternalLandPlugin
         public static void OnStrike(NPC npc, TSPlayer tsp, long damage)
         {
             if (!DamageList.ContainsKey(npc.whoAmI)) DamageList.Add(npc.whoAmI, new DamageNPC(npc.whoAmI));
-            DamageList[npc.whoAmI].CauseDamage(tsp.Account.ID, damage > npc.life ? npc.life : damage);
+            if(tsp.IsLoggedIn) DamageList[npc.whoAmI].CauseDamage(tsp.Account.ID, damage > npc.life ? npc.life : damage);
         }
 
         public static async void OnKill(NPC npc)

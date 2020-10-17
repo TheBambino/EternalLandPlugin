@@ -21,7 +21,7 @@ namespace EternalLandPlugin.Net
         {
             var plr = Main.player[args.Who];
             var tsp = plr.TSPlayer();
-            if (tsp.Account != null) EternalLand.EPlayers[args.Who] = DataBase.GetEPlayer(tsp.Account.ID);
+            if (tsp.Account != null) EternalLand.EPlayers[args.Who] = DataBase.GetEPlayer(tsp.Account.ID).Result;
         }
 
         public static void PlayerLeave(LeaveEventArgs args)
@@ -32,12 +32,13 @@ namespace EternalLandPlugin.Net
             if (tsp.Account != null) EternalLand.EPlayers[args.Who] = null;
         }
 
-        public static void PlayerRegister(AccountCreateEventArgs args)
+        public async static void PlayerRegister(AccountCreateEventArgs args)
         {
             var account = args.Account;
-            var tsp = Utils.GetTSPlayerFromID(account.ID);
-            DataBase.AddEPlayer(account.ID);
-            if (tsp != null) EternalLand.EPlayers[tsp.Index] = DataBase.GetEPlayer(account.ID);
+            Utils.GetTSPlayerFromName(account.Name, out var tsp);
+            DataBase.AddEPlayer(account.ID, account.Name);
+            if (tsp != null) EternalLand.EPlayers[tsp.Index] = DataBase.GetEPlayer(account.ID).Result;
+            tsp.SendSuccessEX($"注册成功! 请使用 {("/login <密码>").ToColorful()} 进行登陆.");
         }
 
         public static void NpcSpawn(NpcSpawnEventArgs args)
@@ -48,12 +49,10 @@ namespace EternalLandPlugin.Net
 
         public static void NpcStrike(NpcStrikeEventArgs args)
         {
-            try
+            if (Utils.GetTSPlayerFromName(args.Player.name, out TSPlayer tsp))
             {
-                TSPlayer tsp = Utils.GetTSPlayerFromName(args.Player.name);
                 Bank.OnStrike(args.Npc, tsp, args.Damage);
             }
-            catch { }
         }
 
         public static void NpcKill(NpcKilledEventArgs args)

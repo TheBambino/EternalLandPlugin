@@ -22,27 +22,23 @@ namespace EternalLandPlugin
             {
                 try
                 {
-
-                    TShock.Players.ForEach(tsp =>
+                    EternalLand.OnlineTSPlayer.ForEach(tsp =>
                     {
-                        if (tsp != null)
+                        var eplr = tsp.EPlayer();
+                        string text = string.Empty;
+                        var col = Rambo();
+                        string rambotitle = $"[c/{System.Drawing.ColorTranslator.ToHtml(System.Drawing.Color.FromArgb(col.R, col.G, col.B)).Replace("#", "")}:  ●永恒之地服务器● ]";
+                        if (eplr != null)
                         {
-                            var eplr = tsp.EPlayer();
-                            string text = string.Empty;
-                            var col = Rambo();
-                            string rambotitle = $"[c/{System.Drawing.ColorTranslator.ToHtml(System.Drawing.Color.FromArgb(col.R, col.G, col.B)).Replace("#", "")}:  ●永恒之地服务器● ]";
-                            if (eplr != null)
-                            {
-                                text = $"{rambotitle}                                                                  \r\n---------------\r\n" 
-                                 + $"[c/9FD1C4:账号资产:] {eplr.Money}{RepeatLineBreaks(59)}";
-                            }
-                            else
-                            {
-                                text = $"{rambotitle}                                                                  \r\n---------------\r\n" 
-                                + $"[c/9FD1C4:欢迎加入服务器:] {RepeatLineBreaks(59)}";
-                            }
-                            tsp.SendData(PacketTypes.Status, text);
+                            text = $"{rambotitle}                                                                \r\n---------------\r\n"
+                             + $"[c/9FD1C4:账号资产:] {eplr.Money}{RepeatLineBreaks(59)}";
                         }
+                        else
+                        {
+                            text = $"{rambotitle}                                                                \r\n---------------\r\n"
+                            + $"[c/9FD1C4:欢迎加入服务器] {RepeatLineBreaks(59)}";
+                        }
+                        tsp.SendData(PacketTypes.Status, text);
                     });
                 }
                 catch { }
@@ -68,7 +64,7 @@ namespace EternalLandPlugin
             public byte B;
             public ColorRGB(Color value)
             {
-               this.R = value.R;
+                this.R = value.R;
                 this.G = value.G;
                 this.B = value.B;
             }
@@ -127,18 +123,18 @@ namespace EternalLandPlugin
                         b = mid1;
                         break;
                     case 3:
-                       r = m;
-                       g = mid2;
+                        r = m;
+                        g = mid2;
                         b = v;
                         break;
                     case 4:
                         r = mid1;
                         g = m;
-                       b = v;
+                        b = v;
                         break;
                     case 5:
                         r = v;
-                       g = m;
+                        g = m;
                         b = mid2;
                         break;
                 }

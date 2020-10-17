@@ -21,7 +21,7 @@ namespace EternalLandPlugin
         public override Version Version => new Version(2, 0);
         public override string Author => "Megghy";
         public override string Description => "永恒之地服务器插件.";
-
+        public static List<TSPlayer> OnlineTSPlayer { get { return (from p in TShock.Players where p != null select p).ToList(); } }
         public static EPlayer[] EPlayers = new EPlayer[255];
 
         public EternalLand(Main game) : base(game)
