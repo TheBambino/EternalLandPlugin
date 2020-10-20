@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using EternalLandPlugin.Account;
 using Microsoft.Xna.Framework;
 using TShockAPI;
 
@@ -30,26 +31,61 @@ namespace EternalLandPlugin
                         string rambotitle = $"[c/{System.Drawing.ColorTranslator.ToHtml(System.Drawing.Color.FromArgb(col.R, col.G, col.B)).Replace("#", "")}:  ●永恒之地服务器● ]";
                         if (eplr != null)
                         {
-                            text = $"{rambotitle}                                                                \r\n---------------\r\n"
-                             + $"[c/9FD1C4:账号资产:] {eplr.Money}{RepeatLineBreaks(59)}";
+                            string hungry = string.Empty;
+                            for (int i = 0; i < 10; i++)
+                            {
+                                if (eplr.HungrValue == 0)
+                                {
+                                    hungry = tsp.GodMode ? "无底洞" : "肚皮空空";
+                                    break;
+                                }
+                                else if (eplr.HungrValue > (3600 * i))
+                                {
+                                    if ((eplr.HungrValue - (3600 * i)) >= 1800) hungry += "=";
+                                    else hungry += "-";
+                                }
+                                else
+                                {
+                                    hungry += "●";
+                                }
+                            }
+                            text = $"{rambotitle}                                                                \r\n" +
+                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:---------------]\r\n" +
+                             $"[c/9FD1C4:资产:] {eplr.Money}\n" +
+                             $"[c/9FD1C4:延迟:] {(eplr.ping < 60 ? "[i:3738]" : "[i:3736]")} {eplr.ping} ms\n" +
+                             $"[c/9FD1C4:饥饿:] [{hungry}]\n" +
+                             $"{RepeatLineBreaks(59)}";
                         }
                         else
                         {
-                            text = $"{rambotitle}                                                                \r\n---------------\r\n"
-                            + $"[c/9FD1C4:欢迎加入服务器] {RepeatLineBreaks(59)}";
+                            text = $"{rambotitle}                                                                \r\n" +
+                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:---------------]\r\n"
+                            + $"[c/9FD1C4:    欢迎加入服务器]" +
+                            $"{RepeatLineBreaks(59)}";
                         }
                         tsp.SendData(PacketTypes.Status, text);
                     });
                 }
-                catch { }
-                Thread.Sleep(100);
+                catch (Exception ex){ Log.Error(ex.Message ); }
+                Thread.Sleep(50);
             }
+        }
+
+        public static void GetPingPakcet(TSPlayer tsp)
+        {
+            var eplr = tsp.EPlayer();
+            if (eplr != null)
+            { 
+                eplr.ping = eplr.PingChecker.ElapsedMilliseconds == 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
+                eplr.PingChecker.Restart();
+            }
+            tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
         }
 
         public static double colornum = 0;
         public static Color Rambo()
         {
-            colornum += 0.01;
+            colornum += 0.0075;
             if (colornum > 1)
             {
                 colornum = 0;

@@ -6,8 +6,10 @@ using System.Threading;
 using System.Threading.Tasks;
 using EternalLandPlugin.Account;
 using EternalLandPlugin.Net;
+using Microsoft.Xna.Framework;
 using OTAPI;
 using Terraria;
+using Terraria.Localization;
 using Terraria.Net.Sockets;
 using TerrariaApi.Server;
 using TShockAPI;
@@ -22,6 +24,7 @@ namespace EternalLandPlugin
         public override string Author => "Megghy";
         public override string Description => "永恒之地服务器插件.";
         public static List<TSPlayer> OnlineTSPlayer { get { return (from p in TShock.Players where p != null select p).ToList(); } }
+        public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null select p).ToList(); } }
         public static EPlayer[] EPlayers = new EPlayer[255];
 
         public EternalLand(Main game) : base(game)
@@ -31,18 +34,25 @@ namespace EternalLandPlugin
         public override void Initialize()
         {
             ServerApi.Hooks.GamePostInitialize.Register(this, PostInitialize);
-           
-            
+
+
         }
-        public void PostInitialize(EventArgs args)
+        public async void PostInitialize(EventArgs args)
         {
+            Main.ServerSideCharacter = true;
             ServerApi.Hooks.NetGreetPlayer.Register(this, ProcessPacket.PlayerJoin);
             ServerApi.Hooks.NetGetData.Register(this, ProcessPacket.GetData);
             ServerApi.Hooks.NpcSpawn.Register(this, ProcessPacket.NpcSpawn);
             ServerApi.Hooks.NpcStrike.Register(this, ProcessPacket.NpcStrike);
             ServerApi.Hooks.NpcKilled.Register(this, ProcessPacket.NpcKill);
             ServerApi.Hooks.WorldSave.Register(this, delegate { DataBase.SaveAllEPlayer(); });
+            ServerApi.Hooks.ServerChat.Register(this, delegate (ServerChatEventArgs args) { Terraria.Chat.ChatHelper.SendChatMessageToClientAs((byte)args.Who, NetworkText.FromLiteral(args.Text), Color.White, args.Who); });
+            GetDataHandlers.KillMe += ProcessPacket.PlayerDeath;
+            Hooks.Game.PostUpdate += delegate (ref GameTime gameTime) { EternalLandUpdate(); };
+            Hooks.Player.PreUpdate += PlayerUpdate;
+
             TShockAPI.Hooks.AccountHooks.AccountCreate += ProcessPacket.PlayerRegister;
+
 
             Commands.ChatCommands.Add(new Command("eternalland.bank.use", ProcessCommand.Bank, new string[]
             {
@@ -66,5 +76,19 @@ namespace EternalLandPlugin
             ServerApi.Hooks.NpcKilled.Deregister(this, ProcessPacket.NpcKill);
             base.Dispose(disposing);
         }
+
+        protected async void EternalLandUpdate()
+        {
+            await Task.Run(() =>
+            {
+                OnlineEPlayer.ForEach(e => e.Update());
+            });
+        }
+
+        protected HookResult PlayerUpdate(Player plr, ref int i)
+        {
+            return HookResult.Continue;
+        }
     }
 }
+

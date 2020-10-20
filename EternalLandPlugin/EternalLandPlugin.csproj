@@ -55,6 +55,7 @@
   <ItemGroup>
     <Compile Include="Account\EPlayer.cs" />
     <Compile Include="Commands.cs" />
+    <Compile Include="Hungr\HungrSystem.cs" />
     <Compile Include="Log.cs" />
     <Compile Include="StatusSender.cs" />
     <Compile Include="Account\UserManager.cs" />

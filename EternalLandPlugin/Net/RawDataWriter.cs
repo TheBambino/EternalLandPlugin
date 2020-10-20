@@ -16,11 +16,11 @@ namespace EternalLandPlugin.Net
 			this.writer.BaseStream.Position = 3L;
 		}
 
-		public RawDataWriter SetType(short type)
+		public RawDataWriter SetType(PacketTypes type)
 		{
 			long position = this.writer.BaseStream.Position;
 			this.writer.BaseStream.Position = 2L;
-			this.writer.Write(type);
+			this.writer.Write((short)type);
 			this.writer.BaseStream.Position = position;
 			return this;
 		}

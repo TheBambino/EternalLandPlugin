@@ -32,7 +32,7 @@ namespace EternalLandPlugin
                             if (Utils.GetTSPlayerFuzzy(cmd[1], out List<TSPlayer> list))
                             {
                                 var receive = list[0];
-                                if (cmd[1] == tsp.Name)
+                                if (receive.Name == tsp.Name)
                                 {
                                     tsp.SendErrorEX("请勿转给自己.");
                                 }
@@ -40,13 +40,13 @@ namespace EternalLandPlugin
                                 {
                                     tsp.SendErrorEX("该玩家尚未注册.");
                                 }
-                                else if(!eplr.TakeMoney(value, $"<转给玩家: {receive.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48)))
+                                else if(!eplr.TakeMoney(value, $"<转给玩家: {receive.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48), true))
                                 {
                                     tsp.SendErrorEX($"资产不足. 当前你的账户中还剩余 {eplr.Money.ToColorful()}.");
                                 }
                                 else
                                 {
-                                    receive.EPlayer().GiveMoney(value, $"<来自玩家 {eplr.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48));
+                                    receive.EPlayer().GiveMoney(value, $"<来自玩家 {eplr.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48), true);
                                     tsp.SendSuccessEX($"成功向玩家 {receive.Name.ToColorful()} 支付 {value.ToColorful()}. 当前余额: {eplr.Money.ToColorful()}.");
                                     receive.SendSuccessEX($"玩家 {tsp.Name.ToColorful()} 向你支付 {value.ToColorful()}. 当前余额: {receive.EPlayer().Money.ToColorful()}.");
                                     Log.Info($"玩家 {tsp.Name} 向 {receive.Name} 支付 {value}.");
@@ -68,9 +68,10 @@ namespace EternalLandPlugin
                         {
                             if (tsp.HasPermission("eternalland.admin"))
                             {
-                                if (Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer e))
+                                if (Utils.TryGetEPlayeFuzzy(cmd[1], out var e, true))
                                 {
-                                    tsp.SendEX($"玩家 {e.Name.ToColorful()} 账户中的资产为 {tsp.EPlayer().Money.ToColorful()}");
+                                    if (e.Count >= 2) tsp.SendMultipleError(e);
+                                    else tsp.SendEX($"玩家 {e[0].Name.ToColorful()} 账户中的资产为 {tsp.EPlayer().Money.ToColorful()}");
                                 }
                                 else
                                 {
@@ -82,7 +83,10 @@ namespace EternalLandPlugin
                                 tsp.SendErrorEX($"你没有权限使用此命令.");
                             }
                         }
-                        tsp.SendEX($"当前你账户中的资产为 [c/8DF9D8:{tsp.EPlayer().Money.ToColorful()}]");
+                        else
+                        {
+                            tsp.SendEX($"当前你账户中的资产为 [c/8DF9D8:{tsp.EPlayer().Money.ToColorful()}]");
+                        }
                         break;
                     case "take":
                     case "t":
@@ -91,24 +95,30 @@ namespace EternalLandPlugin
                             tsp.SendErrorEX("格式错误. /bank take <玩家名> <数额>.");
                             return;
                         }
-                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer give_eplr))
+                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out var take_eplr, true))
                         {
                             tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
                             return;
                         }
-                        else if (!long.TryParse(cmd[2], out long give_num))
+                        else if (take_eplr.Count >= 2)
+                        {
+                            tsp.SendMultipleError(take_eplr);
+                            return;
+                        }
+                        else if (!long.TryParse(cmd[2], out long take_num))
                         {
                             tsp.SendErrorEX("格式错误. /bank take <玩家名> <数额>.");
                             return;
                         }
-                        else if (!give_eplr.TakeMoney(give_num, "<管理员取走>", new Microsoft.Xna.Framework.Color(155,56,48)))
+                        else if (take_eplr[0].Money < take_num)
                         {
-                            tsp.SendErrorEX($"玩家 {give_eplr.Name.ToColorful()} 当前资产仅有 {give_eplr.Money.ToColorful()}.");
+                            tsp.SendErrorEX($"玩家 {take_eplr[0].Name.ToColorful()} 当前资产仅有 {take_eplr[0].Money.ToColorful()}, 无法取走 {take_num.ToColorful()}.");
                             return;
                         }
                         else
                         {
-                            tsp.SendSuccessEX($"成功从玩家 {give_eplr.Name.ToColorful()} 的账户中取走 {give_num.ToColorful()}, 当前剩余 {give_eplr.Money.ToColorful()}");
+                            take_eplr[0].TakeMoney(take_num, "管理员取走", new Microsoft.Xna.Framework.Color(155, 56, 48), true);
+                            tsp.SendSuccessEX($"成功从玩家 {take_eplr[0].Name.ToColorful()} 的账户中取走 {take_num.ToColorful()}, 当前剩余 {(take_eplr[0].Money).ToColorful()}");
                         }
                         break;
                     case "give":
@@ -118,9 +128,14 @@ namespace EternalLandPlugin
                             tsp.SendErrorEX("格式错误. /bank give <玩家名> <数额>.");
                             return;
                         }
-                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out EPlayer give_eplr))
+                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out var give_eplr, true))
                         {
                             tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
+                            return;
+                        }
+                        else if (give_eplr.Count >= 2)
+                        {
+                            tsp.SendMultipleError(give_eplr);
                             return;
                         }
                         else if (!long.TryParse(cmd[2], out long give_num))
@@ -130,8 +145,8 @@ namespace EternalLandPlugin
                         }
                         else
                         {
-                            give_eplr.GiveMoney(give_num, "<管理员给予>", new Microsoft.Xna.Framework.Color(155, 56, 48));
-                            tsp.SendSuccessEX($"成功给予玩家 {give_eplr.Name.ToColorful()} {give_num.ToColorful()} 资产, 当前共有 {give_eplr.Money.ToColorful()}.");
+                            give_eplr[0].GiveMoney(give_num, "管理员给予", new Microsoft.Xna.Framework.Color(155, 56, 48), true);
+                            tsp.SendSuccessEX($"成功给予玩家 {give_eplr[0].Name.ToColorful()} {give_num.ToColorful()} 资产, 当前共有 {(give_eplr[0].Money).ToColorful()}.");
                         }
                         break;
                     case "help":

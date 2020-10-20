@@ -35,24 +35,29 @@ namespace EternalLandPlugin
             }
         }
 
-        public static readonly double Coefficient = 0.1;
+        public static readonly double Coefficient = 0.02;
 
         public static readonly Dictionary<int, DamageNPC> DamageList = new Dictionary<int, DamageNPC>();
 
         public static void OnSpawn(NPC npc)
         {
-            if(!npc.friendly && !npc.townNPC && !DamageList.ContainsKey(npc.whoAmI)) DamageList.Add(npc.whoAmI, new DamageNPC(npc.whoAmI));
+            if (!npc.friendly && !npc.townNPC && !DamageList.ContainsKey(npc.whoAmI)) DamageList.Add(npc.whoAmI, new DamageNPC(npc.whoAmI));
         }
 
         public static void OnStrike(NPC npc, TSPlayer tsp, long damage)
         {
-            if (!DamageList.ContainsKey(npc.whoAmI)) DamageList.Add(npc.whoAmI, new DamageNPC(npc.whoAmI));
-            if(tsp.IsLoggedIn) DamageList[npc.whoAmI].CauseDamage(tsp.Account.ID, damage > npc.life ? npc.life : damage);
+            try
+            {
+                if (!DamageList.ContainsKey(npc.whoAmI)) DamageList.Add(npc.whoAmI, new DamageNPC(npc.whoAmI));
+                if (tsp.IsLoggedIn) DamageList[npc.whoAmI].CauseDamage(tsp.Account.ID, damage > npc.life ? npc.life : damage);
+            }
+            catch { }
         }
 
         public static async void OnKill(NPC npc)
         {
-            await Task.Run(() => {
+            await Task.Run(() =>
+            {
                 if (DamageList.TryGetValue(npc.whoAmI, out DamageNPC info))
                 {
                     DamageList.Remove(npc.whoAmI);
@@ -62,8 +67,9 @@ namespace EternalLandPlugin
                         {
                             var eplr = Utils.GetEPlayerFromID(value.Key);
                             long money = (long)((info.TotalDamage / value.Value) * info.TotalDamage * Coefficient);
-                            eplr.Money += money;
-                            eplr.SendCombatMessage($"+ {money} <{npc.FullName}>", Color.Yellow);
+                            eplr.GiveMoney(money == 0 ? 1 : money, npc.FullName);
+                            if (npc.boss) eplr.BossKillCount++;
+                            else eplr.MobKillCount++;
                         }
                     });
                 }
