@@ -29,7 +29,7 @@ namespace EternalLandPlugin
                         long value = -1;
                         if (cmd.Count < 3 || long.TryParse(cmd[2], out value))
                         {
-                            if (Utils.GetTSPlayerFuzzy(cmd[1], out List<TSPlayer> list))
+                            if (UserManager.GetTSPlayerFuzzy(cmd[1], out List<TSPlayer> list))
                             {
                                 var receive = list[0];
                                 if (receive.Name == tsp.Name)
@@ -68,7 +68,7 @@ namespace EternalLandPlugin
                         {
                             if (tsp.HasPermission("eternalland.admin"))
                             {
-                                if (Utils.TryGetEPlayeFuzzy(cmd[1], out var e, true))
+                                if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var e, true))
                                 {
                                     if (e.Count >= 2) tsp.SendMultipleError(e);
                                     else tsp.SendEX($"玩家 {e[0].Name.ToColorful()} 账户中的资产为 {tsp.EPlayer().Money.ToColorful()}");
@@ -95,7 +95,7 @@ namespace EternalLandPlugin
                             tsp.SendErrorEX("格式错误. /bank take <玩家名> <数额>.");
                             return;
                         }
-                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out var take_eplr, true))
+                        else if (!UserManager.TryGetEPlayeFuzzy(cmd[1], out var take_eplr, true))
                         {
                             tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
                             return;
@@ -128,7 +128,7 @@ namespace EternalLandPlugin
                             tsp.SendErrorEX("格式错误. /bank give <玩家名> <数额>.");
                             return;
                         }
-                        else if (!Utils.TryGetEPlayeFuzzy(cmd[1], out var give_eplr, true))
+                        else if (!UserManager.TryGetEPlayeFuzzy(cmd[1], out var give_eplr, true))
                         {
                             tsp.SendErrorEX($"未找到名称中包含 {cmd[1].ToColorful()} 的玩家.");
                             return;

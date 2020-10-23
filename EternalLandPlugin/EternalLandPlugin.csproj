@@ -33,6 +33,13 @@
     <LangVersion>8.0</LangVersion>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="FakeManager">
+      <HintPath>..\..\..\TShock_4.4.0\ServerPlugins\FakeManager.dll</HintPath>
+    </Reference>
+    <Reference Include="Newtonsoft.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed, processorArchitecture=MSIL">
+      <SpecificVersion>False</SpecificVersion>
+      <HintPath>..\..\..\TShock_4.4.0\Newtonsoft.Json.dll</HintPath>
+    </Reference>
     <Reference Include="OTAPI">
       <HintPath>..\..\..\TShock_4.4.0\OTAPI.dll</HintPath>
     </Reference>
@@ -54,7 +61,12 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="Account\EPlayer.cs" />
+    <Compile Include="AntiCheat\DataCheck.cs" />
     <Compile Include="Commands.cs" />
+    <Compile Include="Game\GameCommand.cs" />
+    <Compile Include="Game\GameData.cs" />
+    <Compile Include="Game\GameNet.cs" />
+    <Compile Include="Game\WorldManager.cs" />
     <Compile Include="Hungr\HungrSystem.cs" />
     <Compile Include="Log.cs" />
     <Compile Include="StatusSender.cs" />
@@ -71,6 +83,6 @@
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
   <PropertyGroup>
-    <PostBuildEvent>copy /Y "$(TargetDir)$(TargetName).dll" "D:\\EternalLand\ServerPlugins"</PostBuildEvent>
+    <PostBuildEvent>copy /Y "$(TargetDir)$(TargetName).dll" "D:\TShock_4.4.0\ServerPlugins"</PostBuildEvent>
   </PropertyGroup>
 </Project>

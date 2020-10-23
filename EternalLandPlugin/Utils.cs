@@ -15,97 +15,6 @@ namespace EternalLandPlugin
     class Utils
     {
         public static Random RANDOM = new Random();
-        public static EPlayer GetEPlayerFromID(int id)
-        {
-            EPlayer eplr = null;
-            EternalLand.OnlineEPlayer.ForEach(e => { if (e.ID == id) eplr = e; });
-            return eplr;
-        }
-
-        public static bool TryGetEPlayerFromID(int id, out EPlayer eplr)
-        {
-            eplr = null;
-            var list = (from temp in EternalLand.OnlineEPlayer where temp.ID == id select temp).ToList();
-            if (list.Any())
-            {
-                eplr = list[0];
-                return true;
-            }
-            else
-            {
-                eplr = null;
-                return false;
-            }
-        }
-
-        public static bool TryGetEPlayeFuzzy(string name, out List<EPlayer> eplrs, bool offline = false)
-        {
-            var list = (from temp in (offline ? DataBase.GetEPlayerFuzzy(name).Result : EternalLand.OnlineEPlayer) where temp.Name.ToLower().Contains(name.ToLower()) select temp).ToList();
-            if (list.Any())
-            {
-                eplrs = list;
-                return true;
-            }
-            else
-            {
-                eplrs = null;
-                return false;
-            }
-        }
-
-        public static bool TryGetEPlayeFromName(string name, out EPlayer eplr, bool offline = false)
-        {
-            eplr = null;
-            var list = (from temp in (offline ? DataBase.GetEPlayerFuzzy(name).Result : EternalLand.OnlineEPlayer) where temp.Name == name select temp).ToList();
-            if (list.Any())
-            {
-                eplr = list[0];
-                return true;
-            }
-            else
-            {
-                eplr = null;
-                return false;
-            }
-        }
-
-        public static bool GetTSPlayerFromName(string name, out TSPlayer tsp)
-        {
-            tsp = null;
-            foreach (var t in from t in EternalLand.OnlineTSPlayer where t.Name == name select t)
-            {
-                tsp = t;
-                return true;
-            }
-
-            return false;
-        }
-
-        public static bool GetTSPlayerFuzzy(string name, out List<TSPlayer> list)
-        {
-            list = new List<TSPlayer>();
-            foreach (var tsp in EternalLand.OnlineTSPlayer)
-            {
-                if (tsp.Name.ToLower().Contains(name.ToLower()))
-                {
-                    list.Add(tsp);
-                }
-            }
-            if (list.Any()) return true;
-            else return false;
-        }
-
-        public static TSPlayer GetTSPlayerFromID(int id)
-        {
-            foreach (var tsp in EternalLand.OnlineTSPlayer)
-            {
-                if (tsp.Account != null && tsp.Account.ID == id)
-                {
-                    return tsp;
-                }
-            }
-            return null;
-        }
 
         public static List<string> BuildLinesFromTerms(IEnumerable terms, Func<object, string> termFormatter = null, string separator = ", ", int maxCharsPerLine = 80)
         {
@@ -168,6 +77,11 @@ namespace EternalLandPlugin
     {
         static string ServerPrefix = "[c/f5b6b1:✿][c/ec7062:-永恒][c/ca6f1d:▪][c/f4cf40:cORE-][c/f9e79f:✿] ";
 
+        public static EItem ToEItem(this Item item)
+        {
+            return new EItem(item);
+        }
+
         public static string ToColorful(this object text, string colortext = "8DF9D8")
         {
             return $"[C/{colortext}:{text.ToString().Replace("[", "<").Replace("]", ">")}]";
@@ -175,12 +89,12 @@ namespace EternalLandPlugin
 
         public static EPlayer EPlayer(this TSPlayer tsp)
         {
-            return tsp.Account != null ? Utils.GetEPlayerFromID(tsp.Account.ID) : null;
+            return tsp.Account != null ? UserManager.GetEPlayerFromID(tsp.Account.ID) : null;
         }
 
         public static TSPlayer TSPlayer(this EPlayer eplr)
         {
-            if (Utils.GetTSPlayerFromName(eplr.Name, out TSPlayer tsp))
+            if (UserManager.GetTSPlayerFromName(eplr.Name, out TSPlayer tsp))
             {
                 return tsp;
             }
@@ -192,7 +106,7 @@ namespace EternalLandPlugin
 
         public static TSPlayer TSPlayer(this Terraria.Player plr)
         {
-            Utils.GetTSPlayerFromName(plr.name, out TSPlayer tsp);
+            UserManager.GetTSPlayerFromName(plr.name, out TSPlayer tsp);
             return tsp;
         }
 
@@ -239,11 +153,22 @@ namespace EternalLandPlugin
         }
         public static void SendData(this EPlayer eplr, PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
         {
-            if (Utils.GetTSPlayerFromName(eplr.Name, out var tsp))
+            if (UserManager.GetTSPlayerFromName(eplr.Name, out var tsp))
             {
                 if (!tsp.RealPlayer || tsp.ConnectionAlive)
                 {
                     NetMessage.SendData((int)msgType, tsp.Index, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
+                }
+            }
+        }
+
+        public static void SendDataToAll(this EPlayer eplr, PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
+        {
+            if (UserManager.GetTSPlayerFromName(eplr.Name, out var tsp))
+            {
+                if (!tsp.RealPlayer || tsp.ConnectionAlive)
+                {
+                    NetMessage.SendData((int)msgType, -1, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
                 }
             }
         }

@@ -5,6 +5,7 @@ using System.IO.Streams;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using EternalLandPlugin.Account;
 using EternalLandPlugin.Hungr;
 using Terraria;
 using Terraria.DataStructures;
@@ -15,7 +16,7 @@ using TShockAPI.Hooks;
 
 namespace EternalLandPlugin.Net
 {
-    internal class ProcessPacket
+    internal class NetProccess
     {
         public static void GetData(GetDataEventArgs args)
         {
@@ -79,7 +80,7 @@ namespace EternalLandPlugin.Net
 
             if (args.MsgID == PacketTypes.PlayerUpdate)
             {
-                if (plr.controlUseItem && (plr.HeldItem.useStyle == 2 || plr.HeldItem.useStyle == 9 || plr.HeldItem.netID == 5) && Utils.TryGetEPlayeFromName(plr.name, out Account.EPlayer eplr) && eplr.HungrValue < 34200 && eplr.CanEat)
+                if (plr.controlUseItem && (plr.HeldItem.useStyle == 2 || plr.HeldItem.useStyle == 9 || plr.HeldItem.netID == 5) && UserManager.TryGetEPlayeFromName(plr.name, out Account.EPlayer eplr) && eplr.HungrValue < 34200 && eplr.CanEat)
                 {
                     HungrSystem.OnEat(eplr, plr.HeldItem.buffTime);
                 }
@@ -95,6 +96,8 @@ namespace EternalLandPlugin.Net
                 var eplr = DataBase.GetEPlayer(tsp.Account.ID).Result;
                 eplr.Online = true;
                 EternalLand.EPlayers[args.Who] = eplr;
+                eplr.SendBag();
+                
             }
             tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
         }
@@ -112,7 +115,7 @@ namespace EternalLandPlugin.Net
         public static void PlayerRegister(AccountCreateEventArgs args)
         {
             var account = args.Account;
-            Utils.GetTSPlayerFromName(account.Name, out var tsp);
+            UserManager.GetTSPlayerFromName(account.Name, out var tsp);
             DataBase.AddEPlayer(account.ID, account.Name);
             tsp.SendSuccessEX($"注册成功! 请使用 {("/login <密码>").ToColorful()} 进行登陆.");
         }
@@ -120,7 +123,7 @@ namespace EternalLandPlugin.Net
         public static bool PlayerHeal(Player plr, int life)
         {
 
-            if (Utils.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
+            if (UserManager.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
             {
                 int lifechange = life - plr.statLife;
                 if (eplr.Life == -1)
@@ -139,8 +142,9 @@ namespace EternalLandPlugin.Net
 
         public static bool PlayerDamage(Player plr, int damage)
         {
-            if (Utils.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
+            if (UserManager.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
             {
+                AntiCheat.DataCheck.OnPlayerDamage(plr, damage);
                 eplr.Life -= damage;
             }
             return false;
@@ -163,7 +167,7 @@ namespace EternalLandPlugin.Net
 
         public static void NpcStrike(NpcStrikeEventArgs args)
         {
-            if (Utils.GetTSPlayerFromName(args.Player.name, out TSPlayer tsp))
+            if (UserManager.GetTSPlayerFromName(args.Player.name, out TSPlayer tsp))
             {
                 Bank.OnStrike(args.Npc, tsp, args.Damage);
             }

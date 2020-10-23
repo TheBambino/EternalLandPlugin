@@ -7,6 +7,7 @@ using Microsoft.Xna.Framework;
 using Terraria;
 using TShockAPI;
 using System.Threading;
+using EternalLandPlugin.Account;
 
 namespace EternalLandPlugin
 {
@@ -65,11 +66,13 @@ namespace EternalLandPlugin
                     {
                         if (value.Value != 0 && !npc.SpawnedFromStatue)
                         {
-                            var eplr = Utils.GetEPlayerFromID(value.Key);
-                            long money = (long)((info.TotalDamage / value.Value) * info.TotalDamage * Coefficient);
-                            eplr.GiveMoney(money == 0 ? 1 : money, npc.FullName);
-                            if (npc.boss) eplr.BossKillCount++;
-                            else eplr.MobKillCount++;
+                            if (UserManager.TryGetEPlayerFromID(value.Key, out var eplr))
+                            {
+                                long money = (long)((info.TotalDamage / value.Value) * info.TotalDamage * Coefficient);
+                                eplr.GiveMoney(money == 0 ? 1 : money, npc.FullName);
+                                if (npc.boss) eplr.BossKillCount++;
+                                else eplr.MobKillCount++;
+                            }
                         }
                     });
                 }

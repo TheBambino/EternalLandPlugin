@@ -1,9 +1,11 @@
-﻿using System;
+﻿using Microsoft.Xna.Framework;
+using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Terraria;
 
 namespace EternalLandPlugin.Net
 {
@@ -76,6 +78,12 @@ namespace EternalLandPlugin.Net
 		public RawDataWriter PackString(string str)
 		{
 			this.writer.Write(str);
+			return this;
+		}
+
+		public RawDataWriter PackRGB(Color? color)
+		{
+			this.writer.WriteRGB((Color)color);
 			return this;
 		}
 

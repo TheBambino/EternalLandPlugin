@@ -5,8 +5,10 @@ using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
 using EternalLandPlugin.Account;
+using Newtonsoft.Json;
 using TShockAPI;
 using TShockAPI.DB;
+using static EternalLandPlugin.Account.EPlayer;
 
 namespace EternalLandPlugin
 {
@@ -17,37 +19,44 @@ namespace EternalLandPlugin
             var t = typeof(EPlayer);
             var list = new List<string>();
             var eplr = new EPlayer();
-            try {
+            try
+            {
                 for (int i = 0; i < reader.Reader.FieldCount; i++)
                 {
                     list.Add(reader.Reader.GetName(i));
                 }
-                t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(p => {
-                    var _attrs = p.GetCustomAttributes(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                    if (list.Contains(p.Name))
-                    {
-                        Type type = p.PropertyType;
-                        if (type == typeof(string)) p.SetValue(eplr, reader.Get<string>(p.Name));
-                        else if (type == typeof(long)) p.SetValue(eplr, reader.Get<long>(p.Name));
-                        else if (type == typeof(double)) p.SetValue(eplr, reader.Get<double>(p.Name));
-                        else if (type == typeof(int)) p.SetValue(eplr, reader.Get<int>(p.Name));
-                        else p.SetValue(eplr, reader.Get<string>(p.Name));
-                    }
-                });
-                t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(f =>
+                t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(temp =>
                 {
-                    var _attrs = f.GetCustomAttributes(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                    if (list.Contains(f.Name))
+                    var attr = temp.GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
+                    if (list.Contains(temp.Name))
                     {
-                        Type type = f.FieldType;
-                        if (type == typeof(string)) f.SetValue(eplr, reader.Get<string>(f.Name));
-                        else if (type == typeof(long)) f.SetValue(eplr, reader.Get<long>(f.Name));
-                        else if (type == typeof(double)) f.SetValue(eplr, reader.Get<double>(f.Name));
-                        else if (type == typeof(int)) f.SetValue(eplr, reader.Get<int>(f.Name));
-                        else f.SetValue(eplr, reader.Get<string>(f.Name));
+                        Type type = temp.PropertyType;
+                        if (type == typeof(string)) temp.SetValue(eplr, reader.Get<string>(temp.Name));
+                        else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
+                        else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
+                        else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
+                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
+                        else if(type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
+                        else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
                 });
-            } catch (Exception ex){ Log.Error(ex.Message); }
+                t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(temp =>
+                {
+                    var attr = temp.GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
+                    if (list.Contains(temp.Name))
+                    {
+                        Type type = temp.FieldType;
+                        if (type == typeof(string)) temp.SetValue(eplr, reader.Get<string>(temp.Name));
+                        else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
+                        else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
+                        else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
+                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
+                        else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
+                        else temp.SetValue(eplr, reader.Get<string>(temp.Name));
+                    }
+                });
+            }
+            catch (Exception ex) { Log.Error(ex.Message); }
             return eplr;
         }
 
@@ -59,14 +68,20 @@ namespace EternalLandPlugin
         public static bool AddEPlayer(int id, string name)
         {
             Log.Info($"向数据库中添加玩家 {name}");
-            if (Utils.GetTSPlayerFuzzy(name, out List<TSPlayer> list))
+            if (UserManager.GetTSPlayerFuzzy(name, out List<TSPlayer> list))
             {
-                EternalLand.EPlayers[list[0].Index] = new EPlayer { ID = id, Name = name };
+                EternalLand.EPlayers[list[0].Index] = new EPlayer() { ID = id, Name = name };
             }
-            return RunSql($"INSERT INTO EternalLand (ID,Name) VALUE (@0,@1)", new object[]
+            var bag = new List<EItem>();
+            for (int i = 0; i < 260; i++)
+            {
+                bag.Add(new EItem());
+            }
+            return RunSql($"INSERT INTO EternalLand (ID,Name,Bag) VALUE (@0,@1,@2)", new object[]
             {
                 id,
-                name
+                name,
+                JsonConvert.SerializeObject(bag)
             }).Read();
         }
 
@@ -89,7 +104,7 @@ namespace EternalLandPlugin
                 while (reader.Read())
                 {
                     var eplr = GetEPlayerFromReader(reader);
-                    if (EternalLand.OnlineEPlayer.Where(e => e.ID == eplr.ID).Any()) list.Add(Utils.GetEPlayerFromID(eplr.ID));
+                    if (EternalLand.OnlineEPlayer.Where(e => e.ID == eplr.ID).Any()) list.Add(UserManager.GetEPlayerFromID(eplr.ID));
                     else list.Add(eplr);
                 }
                 return list;
@@ -100,7 +115,8 @@ namespace EternalLandPlugin
         {
             await Task.Run(() =>
             {
-                try {
+                try
+                {
                     string sql = string.Empty;
                     List<object> value = new List<object>() { eplr.ID };
                     int num = 1;
@@ -108,28 +124,30 @@ namespace EternalLandPlugin
                     var properties = t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
                     for (int i = 0; i < properties.Length; i++)
                     {
-                        var _attrs = properties[i].GetCustomAttributes(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                        if (_attrs.Where(a => a is ShouldSave).Any())
+                        var attr = properties[i].GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
+                        if (attr != null)
                         {
+                            var a = (ShouldSave)attr;
                             sql += $"{(num == 1 ? "" : ",")}{properties[i].Name}=@{num}";
-                            value.Add(properties[i].GetValue(eplr));
+                            value.Add(a.Serializable ? JsonConvert.SerializeObject(properties[i].GetValue(eplr)) : properties[i].GetValue(eplr));
                             num++;
                         }
-
                     }
                     var field = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
                     for (int i = 0; i < field.Length; i++)
                     {
-                        var _attrs = field[i].GetCustomAttributes(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                        if (_attrs.Where(a => a is ShouldSave).Any())
+                        var attr = field[i].GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
+                        if (attr != null)
                         {
+                            var a = (ShouldSave)attr;
                             sql += $",{field[i].Name}=@{num}";
-                            value.Add(field[i].GetValue(eplr));
+                            value.Add(a.Serializable ? JsonConvert.SerializeObject(field[i].GetValue(eplr)) : field[i].GetValue(eplr));
                             num++;
                         }
                     }
                     var reader = RunSql($"UPDATE EternalLand SET {sql} WHERE ID = @0", value.ToArray());
-                } catch (Exception ex) { Log.Error(ex.Message); }
+                }
+                catch (Exception ex) { Log.Error(ex.Message); }
             });
         }
 
@@ -141,9 +159,73 @@ namespace EternalLandPlugin
             });
         }
 
+        public static async void SaveCharacter(EPlayerData data)
+        {
+            await Task.Run(() =>
+            {
+                string sql = string.Empty;
+                try
+                {
+                    List<object> value = new List<object>();
+                    int num = 0;
+                    var t = typeof(EPlayerData);
+                    var field = t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly);
+                    for (int i = 0; i < field.Length; i++)
+                    {
+                        sql += $"{(num == 0 ? "" : ",")}{field[i].Name}=@{num}";
+                        if (field[i].FieldType == typeof(Microsoft.Xna.Framework.Color?)) value.Add(TShock.Utils.EncodeColor((Microsoft.Xna.Framework.Color?)field[i].GetValue(data)));
+                        else if(field[i].FieldType == typeof(List<EItem>)) value.Add(JsonConvert.SerializeObject(field[i].GetValue(data)));
+                        else if (field[i].FieldType == typeof(bool[])) value.Add(JsonConvert.SerializeObject(field[i].GetValue(data)));
+                        else value.Add(field[i].GetValue(data));
+                        num++;
+                    }
+                    var reader = RunSql($"REPLACE INTO EternalLandData SET {sql}", value.ToArray());
+                }
+                catch (Exception ex) { Log.Error(ex.InnerException.Message + $"\nSQL语句为 {sql}." ); }
+            });
+        }
+
+        public static async void GetAllCharacter()
+        {
+            await Task.Run(() =>
+            {
+                var reader = RunSql($"SELECT * FROM EternalLandData");
+                while (reader.Read())
+                {
+                    var t = typeof(EPlayerData);
+                    var list = new List<string>();
+                    var data = new EPlayerData();
+                    try
+                    {
+                        for (int i = 0; i < reader.Reader.FieldCount; i++)
+                        {
+                            list.Add(reader.Reader.GetName(i));
+                        }
+                        t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(temp =>
+                        {
+                            var attr = temp.GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
+                            if (list.Contains(temp.Name))
+                            {
+                                Type type = temp.FieldType;
+                                if (type == typeof(string)) temp.SetValue(data, reader.Get<string>(temp.Name));
+                                else if (type == typeof(int)) temp.SetValue(data, reader.Get<int>(temp.Name));
+                                else if (type == typeof(List<EItem>)) temp.SetValue(data, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
+                                else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(data, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
+                                else if (type == typeof(bool[])) temp.SetValue(data, JsonConvert.DeserializeObject<bool[]>(reader.Get<string>(temp.Name)));
+                                else temp.SetValue(data, reader.Get<string>(temp.Name));
+                            }
+                        });
+                    }
+                    catch (Exception ex) { Log.Error(ex.Message); }
+                    Game.GameData.Character.Add(data.Name, data);
+                }
+                Log.Info($"共载入 {Game.GameData.Character.Count} 条角色数据.");
+            });
+        }
+
         public static bool UpdateMoney(int id, long money)
         {
-            return RunSql($"UPDATE EternalLand SET Money=@0 WHERE ID = @1", new object[]
+            return RunSql($"UPDATE EternalLand SET Money=@0 WHERE ID=@1", new object[]
             {
                 money,
                 id
