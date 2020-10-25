@@ -1,15 +1,20 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using System.Timers;
+using EternalLandPlugin.Game;
 using EternalLandPlugin.Net;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.Localization;
 using TShockAPI;
+using TShockAPI.Net;
+using Timer = System.Timers.Timer;
 
 namespace EternalLandPlugin.Account
 {
@@ -28,6 +33,37 @@ namespace EternalLandPlugin.Account
                     }
                     Bag = bag;
                 }
+                DynamicLoading = new Thread(new ThreadStart(delegate
+                {
+                    try
+                    {
+                        int x = 0;
+                        int y = 0;
+                        while (true)
+                        {
+                            if (IsInAnotherWorld)
+                            {
+                                try
+                                {
+                                    x = TileX;
+                                    y = TileY;
+                                    var playerrec = new Rectangle(x - 75, y - 75, 150, 150);
+                                    LoadedChuck.Keys.Where(k => k.Intersects(playerrec) && !LoadedChuck[k]).ForEach(rec =>
+                                    {
+                                        SendChuck(rec.X, rec.Y, new MapManager.MapData(Map.GetChuck(rec.X, rec.Y) ?? new FakeTileProvider(100, 100), x, y));
+                                        Thread.Sleep(50);
+                                        SendChuck(rec.X, rec.Y, new MapManager.MapData(Map.GetChuck(rec.X, rec.Y) ?? new FakeTileProvider(100, 100), x, y));
+                                        LoadedChuck[rec] = true;
+                                        Log.Info($"{rec.X} {rec.Y}");
+                                    });
+                                }
+                                catch { }
+                            }
+                            Thread.Sleep(100);
+                        }
+                    }
+                    catch { }
+                }));
             }
             else
             {
@@ -61,7 +97,7 @@ namespace EternalLandPlugin.Account
 
         public async void Save() => await DataBase.SaveEPlayer(this);
 
-        public TSPlayer tsp { get { return UserManager.GetTSPlayerFromID(ID) ?? new TSPlayer(-1); } }
+        public TSPlayer tsp { get { return UserManager.GetTSPlayerFromName(Name, out TSPlayer t) ? t : new TSPlayer(-1); } }
         public Player plr { get { return tsp.Index == -1 ? new Player() : tsp.TPlayer; } }
 
         #region -- 玩家信息 --
@@ -71,6 +107,14 @@ namespace EternalLandPlugin.Account
         public int Index { get { return tsp.Index; } }
 
         public string Name = "Unknown";
+
+        public int TileX = 0;
+
+        public int TileY = 0;
+
+        public int X = 0;
+
+        public int Y = 0;
 
         [ShouldSave]
         public long Money = 0;
@@ -139,6 +183,10 @@ namespace EternalLandPlugin.Account
 
         [ShouldSave]
         public long Point = 0;
+
+        public bool IsInAnotherWorld = false;
+
+        public Game.MapManager.MapData Map = new Game.MapManager.MapData();
         #endregion
         #endregion
 
@@ -181,7 +229,7 @@ namespace EternalLandPlugin.Account
                 this.SendDataToAll(PacketTypes.PlayerHp, "", Index);
                 this.SendDataToAll(PacketTypes.EffectMana, "", Index);
             }
-            
+
         }
 
         public bool ChangeCharacter(string name)
@@ -203,16 +251,84 @@ namespace EternalLandPlugin.Account
             tsp.PlayerData.RestoreCharacter(tsp);
             SendBag();
         }
+        public void BackToOriginMap()
+        {
+            Map = new MapManager.MapData() { Origin = true };
+            IsInAnotherWorld = false;
+            ResetSection();
+            tsp.Spawn((PlayerSpawnContext)2);
+        }
+        void ResetSection()
+        {
+            tsp.SendData(PacketTypes.WorldInfo, "", 0, 0f, 0f, 0f, 0);
+            int sectionX = Netplay.GetSectionX(0);
+            int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
+            int sectionY = Netplay.GetSectionY(0);
+            int sectionY2 = Netplay.GetSectionY(Main.maxTilesY);
+            for (int i = sectionX; i <= sectionX2; i++)
+            {
+                for (int j = sectionY; j <= sectionY2; j++)
+                {
+                    Netplay.Clients[Index].TileSections[i, j] = false;
+                }
+            }
+
+        }
+        public void SendMap(MapManager.MapData data, int x = -1, int y = -1)
+        {
+            int sectionX = Netplay.GetSectionX(0);
+            int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
+            int sectionY = Netplay.GetSectionY(0);
+            int sectionY2 = Netplay.GetSectionY(Main.maxTilesY);
+            for (int i = sectionX; i <= sectionX2; i++)
+            {
+                for (int j = sectionY; j <= sectionY2; j++)
+                {
+                    Netplay.Clients[Index].TileSections[i, j] = true;
+                }
+            }
+            IsInAnotherWorld = true;
+            MapManager.ChangeWorldInfo(this);
+            LoadedChuck.Clear();
+            for (int ry = 0; ry < 24; ry++)
+            {
+                for (int rx = 0; rx < 84; rx++)
+                {
+                    LoadedChuck.Add(new Rectangle(rx * 100, ry * 100, 100, 100), false);
+                }
+            }
+            data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
+            data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
+            Map = data;
+            if (!DynamicLoading.IsAlive) DynamicLoading.Start();
+        }
+
+        readonly Dictionary<Rectangle, bool> LoadedChuck = new Dictionary<Rectangle, bool>();
+        Thread DynamicLoading;
+        /// <summary>
+        /// 
+        /// </summary>
+        /// <param name="x">将要发的送到的左上角X坐标</param>
+        /// <param name="y">将要发的送到的左上角Y坐标</param>
+        /// <param name="data"></param>
+        async void SendChuck(int x, int y, MapManager.MapData data)
+        {
+            MapManager.SendMap(this, data, x, y);
+        }
         #endregion
         public override bool Equals(object obj)
         {
             return ID.ToString() == obj.ToString();
         }
 
-        public bool Update()
+        public bool Update(Player plr)
         {
             try
             {
+                TileX = (int)(plr.position.X / 16);
+                TileY = (int)(plr.position.Y / 16);
+                X = (int)plr.position.X;
+                Y = (int)plr.position.Y;
                 //玩家状态更新
                 if (plr.controlUseItem && plr.HeldItem.damage != -1 && plr.HeldItem.pick == 0 && plr.HeldItem.axe == 0) Status = StatusType.Battle;
                 else if (plr.controlUseItem && (plr.HeldItem.pick != 0 || plr.HeldItem.axe != 0)) Status = EPlayer.StatusType.Mining;
@@ -270,28 +386,25 @@ namespace EternalLandPlugin.Account
                         }
                     }
                 }
-               
+
 
 
             }
             catch { }
             return false;
         }
-
         public void SendCombatMessage(string msg, Color color = default)
         {
             color = color == default ? Color.White : color;
             Random random = new Random();
             if (tsp != null) tsp.SendData(PacketTypes.CreateCombatTextExtended, msg, (int)color.PackedValue, tsp.X + random.Next(-75, 75), tsp.Y + random.Next(-50, 50));
         }
-
         public void GiveMoney(long value, string from = null, Color color = default, bool save = false)
         {
             if (from != null && Online) SendCombatMessage($"+ {value} <{from ?? "未知"}>", color == default ? Color.Yellow : color);
             Money += value;
             if (save) Save();
         }
-
         public bool TakeMoney(long value, string from = null, Color color = default, bool save = false)
         {
             if (Money >= value)
@@ -306,13 +419,58 @@ namespace EternalLandPlugin.Account
                 return false;
             }
         }
-
         public void Heal(int heal)
         {
             Life += heal;
             tsp.Heal(heal);
         }
 
+        public void SendSuccessEX(object text)
+        {
+            tsp.SendMessage(Expansion.ServerPrefix + text, new Color(120, 194, 96));
+        }
+
+        public void SendInfoEX(object text)
+        {
+            tsp.SendMessage(Expansion.ServerPrefix + text, new Color(216, 212, 82));
+        }
+
+        public void SendErrorEX(object text)
+        {
+            tsp.SendMessage(Expansion.ServerPrefix + text, new Color(195, 83, 83));
+        }
+
+        public void SendEX(object text, Color color = default)
+        {
+            color = color == default ? new Color(212, 239, 245) : color;
+            tsp.SendMessage(Expansion.ServerPrefix + text, color);
+        }
+        public void SendData(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
+        {
+            if (UserManager.GetTSPlayerFromName(Name, out var tsp))
+            {
+                if (!tsp.RealPlayer || tsp.ConnectionAlive)
+                {
+                    NetMessage.SendData((int)msgType, tsp.Index, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
+                }
+            }
+        }
+
+        public void SendRawData(byte[] data)
+        {
+            try { tsp.SendRawData(data); } catch { }
+        }
+
+        public void SendDataToAll(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
+        {
+            if (UserManager.GetTSPlayerFromName(Name, out var tsp))
+            {
+                if (!tsp.RealPlayer || tsp.ConnectionAlive)
+                {
+                    NetMessage.SendData((int)msgType, -1, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
+                }
+            }
+        }
         public override int GetHashCode()
         {
             return base.GetHashCode();

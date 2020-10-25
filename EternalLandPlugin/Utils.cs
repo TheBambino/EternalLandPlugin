@@ -12,7 +12,7 @@ using TShockAPI;
 
 namespace EternalLandPlugin
 {
-    class Utils
+    public class Utils
     {
         public static Random RANDOM = new Random();
 
@@ -59,6 +59,12 @@ namespace EternalLandPlugin
             }
             return list;
         }
+
+        public static void SendRawDataToAll(byte[] data)
+        {
+            EternalLand.OnlineTSPlayer.ForEach(t => t.SendRawData(data));
+        }
+
         #region 游戏内快捷函数
         public static void DropItem(int x, int y, Item item, Vector2 vector = default)
         {
@@ -68,14 +74,22 @@ namespace EternalLandPlugin
         public static void DropItem(int x, int y, int id, int stack = 1, int prefix = 0, Vector2 vector = default)
         {
             int number = Item.NewItem((int)x, (int)y, (int)(vector == default ? 0 : vector.X), (int)(vector == default ? 0 : vector.Y), id, stack, true, prefix, true, false);
-            NetMessage.SendData(21, -1, -1, null,number);
+            NetMessage.SendData(21, -1, -1, null, number);
+        }
+        public static Item GetItemFromTile(int x, int y, OTAPI.Tile.ITile itile)
+        {
+            WorldGen.KillTile_GetItemDrops(x, y, itile, out int id, out int stack, out int secondaryitem, out int secondarystack);
+            Item item = new Item();
+            item.SetDefaults(id);
+            item.stack = stack;
+            return item;
         }
         #endregion
     }
 
     public static class Expansion
     {
-        static string ServerPrefix = "[c/f5b6b1:✿][c/ec7062:-永恒][c/ca6f1d:▪][c/f4cf40:cORE-][c/f9e79f:✿] ";
+        public static readonly string ServerPrefix = "[c/f5b6b1:✿][c/ec7062:-永恒][c/ca6f1d:▪][c/f4cf40:cORE-][c/f9e79f:✿] ";
 
         public static EItem ToEItem(this Item item)
         {
@@ -131,47 +145,6 @@ namespace EternalLandPlugin
             tsp.SendMessage(ServerPrefix + text, color);
         }
 
-        public static void SendSuccessEX(this EPlayer eplr, object text)
-        {
-            eplr.tsp.SendMessage(ServerPrefix + text, new Color(120, 194, 96));
-        }
-
-        public static void SendInfoEX(this EPlayer eplr, object text)
-        {
-            eplr.tsp.SendMessage(ServerPrefix + text, new Color(216, 212, 82));
-        }
-
-        public static void SendErrorEX(this EPlayer eplr, object text)
-        {
-            eplr.tsp.SendMessage(ServerPrefix + text, new Color(195, 83, 83));
-        }
-
-        public static void SendEX(this EPlayer eplr, object text, Color color = default)
-        {
-            color = color == default ? new Color(212, 239, 245) : color;
-            eplr.tsp.SendMessage(ServerPrefix + text, color);
-        }
-        public static void SendData(this EPlayer eplr, PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
-        {
-            if (UserManager.GetTSPlayerFromName(eplr.Name, out var tsp))
-            {
-                if (!tsp.RealPlayer || tsp.ConnectionAlive)
-                {
-                    NetMessage.SendData((int)msgType, tsp.Index, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
-                }
-            }
-        }
-
-        public static void SendDataToAll(this EPlayer eplr, PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
-        {
-            if (UserManager.GetTSPlayerFromName(eplr.Name, out var tsp))
-            {
-                if (!tsp.RealPlayer || tsp.ConnectionAlive)
-                {
-                    NetMessage.SendData((int)msgType, -1, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
-                }
-            }
-        }
 
         public static void SendMultipleError(this TSPlayer tsp, IEnumerable<object> matches)
         {

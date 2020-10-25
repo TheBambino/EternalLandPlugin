@@ -70,6 +70,16 @@ namespace EternalLandPlugin.Game
                         eplr.SetToOriginCharacter();
                         tsp.SendSuccessEX("执行完成.");
                         break;
+                    case "wld":
+                        eplr.SendMap(new MapManager.MapData(2152, 494, 1000, 300), 4200, 450);
+                       
+                        break;
+                    case "clear":
+                        Game.MapManager.ClearWorld(eplr);
+                        break;
+                    case "back":
+                        eplr.BackToOriginMap();
+                        break;
                 }
             }
             

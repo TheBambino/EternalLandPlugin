@@ -6,9 +6,12 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using EternalLandPlugin.Account;
+using EternalLandPlugin.Game;
 using EternalLandPlugin.Hungr;
+using OTAPI.Tile;
 using Terraria;
 using Terraria.DataStructures;
+using Terraria.Localization;
 using Terraria.Net.Sockets;
 using TerrariaApi.Server;
 using TShockAPI;
@@ -97,9 +100,10 @@ namespace EternalLandPlugin.Net
                 eplr.Online = true;
                 EternalLand.EPlayers[args.Who] = eplr;
                 eplr.SendBag();
-                
+                if (eplr.Name == "咕咕咕") eplr.ChangeCharacter("y0");
             }
             tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
+            //tsp.SendData(PacketTypes.TileFrameSection, "", 0, 0, 1000,1000);
         }
 
         public static void PlayerLeave(LeaveEventArgs args)

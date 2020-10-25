@@ -31,6 +31,12 @@ namespace EternalLandPlugin.Game
                             Microsoft.Xna.Framework.Vector2 position = reader.ReadVector2();
                             TSPlayer.All.SendErrorMessage(id.ToString() + " " + position.X + " " + position.Y);
                             break;
+                        case (PacketTypes)20:
+                        case (PacketTypes)10:
+                        case PacketTypes.Tile:
+                            args.Handled = true;
+
+                            break;
                     }
                 }
             }

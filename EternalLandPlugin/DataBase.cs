@@ -1,10 +1,13 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Reflection;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Threading.Tasks;
 using EternalLandPlugin.Account;
+using EternalLandPlugin.Game;
 using Newtonsoft.Json;
 using TShockAPI;
 using TShockAPI.DB;
@@ -219,7 +222,25 @@ namespace EternalLandPlugin
                     catch (Exception ex) { Log.Error(ex.Message); }
                     Game.GameData.Character.Add(data.Name, data);
                 }
-                Log.Info($"共载入 {Game.GameData.Character.Count} 条角色数据.");
+                Log.Info($"共载入 {GameData.Character.Count} 条角色数据.");
+            });
+        }
+
+        public static async void SaveMap(string name, MapManager.MapData data)
+        {
+            await Task.Run(() =>
+            {
+                try
+                {
+                    using (MemoryStream ms = new MemoryStream())
+                    {
+                        BinaryFormatter bFormatter = new BinaryFormatter();
+                        bFormatter.Serialize(ms, data);
+                        byte[] map = ms.ToArray();
+                        var reader = RunSql($"REPLACE INTO EternalLandMap SET Name=@0,Data=@1", new object[] { name, map });
+                    }
+                }
+                catch (Exception ex) { Log.Error(ex.InnerException.Message); }
             });
         }
 
