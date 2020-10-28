@@ -71,15 +71,21 @@ namespace EternalLandPlugin.Game
                         tsp.SendSuccessEX("执行完成.");
                         break;
                     case "wld":
-                        if (cmd.Count > 2) eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394,int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
-                        else eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(eplr.TileX - 25, eplr.TileX - 25, 50, 50), 4100, 400));
+                        if (cmd.Count > 2) eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394,int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
+                        else eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(eplr.TileX - 25, eplr.TileX - 25, 50, 50), 4100, 400));
 
                         break;
                     case "clear":
-                        eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
+                        eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
                         break;
                     case "back":
                         eplr.BackToOriginMap();
+                        break;
+                    case "join":
+                        if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var t))
+                        {
+                            eplr.JoinMap(t[0].GameInfo.MapUUID);
+                        }
                         break;
                 }
             }

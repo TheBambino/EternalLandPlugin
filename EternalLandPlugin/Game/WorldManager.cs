@@ -289,7 +289,7 @@ namespace EternalLandPlugin.Game
         {
             if (GetMapFromUUID(uuid, out var data) && !data.Player.Contains(eplr.ID))
             {
-                eplr.SendMap(uuid);
+                eplr.JoinMap(uuid);
             }
         }
         public static void CheckMapAlive()
@@ -315,6 +315,17 @@ namespace EternalLandPlugin.Game
                 }
                 if (restartnow) continue;
                 Thread.Sleep(1000);
+            }
+        }
+        public static void SendProjectile(EPlayer eplr)
+        {
+            if (eplr.GameInfo.IsInAnotherWorld)
+            {
+                Main.projectile.Where(p => p.active && eplr.GameInfo.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
+            }
+            else
+            {
+                Main.projectile.Where(p => p.active && eplr.GameInfo.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
             }
         }
         public static void SendMap(EPlayer eplr, MapData data, int x, int y)

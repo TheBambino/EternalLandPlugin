@@ -1,8 +1,12 @@
-﻿using System;
+﻿using EternalLandPlugin.Game;
+using EternalLandPlugin.Net;
+using System;
 using System.Collections.Generic;
+using System.Diagnostics.Eventing.Reader;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Terraria;
 using TShockAPI;
 
 namespace EternalLandPlugin.Account
@@ -89,16 +93,75 @@ namespace EternalLandPlugin.Account
             else return false;
         }
 
-        public static TSPlayer GetTSPlayerFromID(int id)
+        public static bool GetTSPlayerFromID(int id, out TSPlayer tsp)
         {
-            foreach (var tsp in EternalLand.OnlineTSPlayer)
+            foreach (var t in EternalLand.OnlineTSPlayer)
             {
-                if (tsp.Account != null && tsp.Account.ID == id)
+                if (t.Account != null && t.Account.ID == id)
                 {
-                    return tsp;
+                    tsp = t;
+                    return true;
                 }
             }
-            return null;
+            tsp = null;
+            return false;
+        }
+
+        public async static void UpdateInfoToOtherPlayers(EPlayer eplr)
+        {
+            await Task.Run(() =>
+            {
+                SetPlayerActive(eplr);
+                System.Threading.Thread.Sleep(1000);
+                SetCharacter(eplr);
+                SetBag(eplr);
+            });
+        }
+
+        public static void SetBag(EPlayer eplr)
+        {
+            var list = eplr.GameInfo.TempCharacter == null ? eplr.GameInfo.Character.Bag : eplr.GameInfo.TempCharacter.Bag;
+            for (int i = 0; i < 260; i++)
+            {
+                var item = list[i] ?? new EItem();
+                EternalLand.OnlineEPlayer.ForEach(e =>
+                {
+                    if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.Stack).PackByte((byte)item.Prefix).PackInt16((short)item.ID).GetByteData());
+                });
+            }
+        }
+
+        public static void SetPlayerActive(EPlayer eplr)
+        {
+            if (MapManager.GetMapFromUUID(eplr.GameInfo.MapUUID, out var map) && eplr.GameInfo.MapUUID != Guid.Empty)
+            {
+                EternalLand.OnlineEPlayer.ForEach(e =>
+                {
+                    if (e != eplr)
+                    {
+                        e.tsp.SendData(PacketTypes.PlayerActive, "", eplr.Index, map.Player.Contains(e.ID) ? 1 : 0);
+                        eplr.SendData(PacketTypes.PlayerActive, "", e.Index, map.Player.Contains(e.ID) ? 1 : 0);
+                    }
+                });
+            }
+            else //eplr 回到主世界
+            {
+                EternalLand.OnlineEPlayer.ForEach(e =>
+                {
+                    if (e != eplr)
+                    {
+                        e.tsp.SendData(PacketTypes.PlayerActive, "", eplr.Index, e.GameInfo.MapUUID == eplr.GameInfo.MapUUID ? 1 : 0);
+                        eplr.SendData(PacketTypes.PlayerActive, "", e.Index, e.GameInfo.MapUUID == eplr.GameInfo.MapUUID ? 1 : 0);
+                    }                   
+                });
+            }
+        }
+
+        public static void SetCharacter(EPlayer eplr)
+        {
+            NetMessage.SendData(4, -1, -1, null, eplr.Index);
+            NetMessage.SendData(16, -1, -1, null, eplr.Index);
+            NetMessage.SendData(42, -1, -1, null, eplr.Index);
         }
     }
 }

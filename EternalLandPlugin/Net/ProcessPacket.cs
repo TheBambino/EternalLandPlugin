@@ -97,7 +97,6 @@ namespace EternalLandPlugin.Net
             if (tsp.Account != null)
             {
                 var eplr = DataBase.GetEPlayer(tsp.Account.ID).Result;
-                eplr.Online = true;
                 EternalLand.EPlayers[args.Who] = eplr;
                 eplr.SendBag();
                 if (eplr.Name == "咕咕咕") eplr.ChangeCharacter("y0");
@@ -110,10 +109,13 @@ namespace EternalLandPlugin.Net
         {
             var plr = Main.player[args.Who];
             var tsp = plr.TSPlayer();
-            tsp.EPlayer().Save();
-            EternalLand.EPlayers[args.Who].Online = false;
-            EternalLand.EPlayers[args.Who].Dispose();
-            if (tsp.Account != null) EternalLand.EPlayers[args.Who] = null;
+            var eplr = tsp.EPlayer();
+            if (eplr != null)
+            {
+                tsp.EPlayer().Save();
+                EternalLand.EPlayers[args.Who].Dispose();
+                EternalLand.EPlayers[args.Who] = null;
+            }            
         }
 
         public static void PlayerRegister(AccountCreateEventArgs args)

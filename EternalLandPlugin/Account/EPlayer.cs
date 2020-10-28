@@ -20,21 +20,12 @@ using Color = Microsoft.Xna.Framework.Color;
 
 namespace EternalLandPlugin.Account
 {
-    public class EPlayer
+    public class EPlayer : IDisposable
     {
         public EPlayer()
         {
             if (EternalLand.IsGameMode)
             {
-                if (Bag == null)
-                {
-                    var bag = new List<EItem>();
-                    for (int i = 0; i < 260; i++)
-                    {
-                        bag.Add(new EItem());
-                    }
-                    Bag = bag;
-                }
                 DynamicLoading = new Thread(new ThreadStart(delegate
                 {
                     try
@@ -42,7 +33,7 @@ namespace EternalLandPlugin.Account
                         Thread.Sleep(500);
                         while (true)
                         {
-                            if (gameInfo.IsInAnotherWorld)
+                            if (GameInfo.IsInAnotherWorld)
                             {
                                 try
                                 {
@@ -50,7 +41,7 @@ namespace EternalLandPlugin.Account
                                     {
                                         if (!LoadedChuck[key] && key.IntersectsWith(new Rectangle(TileX - 75, TileY - 75, 150, 150)))
                                         {
-                                            SendChuck(key.X, key.Y, new MapManager.MapData(gameInfo.Map.GetChuck(key.X, key.Y).Result, key.X, key.Y));
+                                            SendChuck(key.X, key.Y, new MapManager.MapData(GameInfo.Map.GetChuck(key.X, key.Y).Result, key.X, key.Y));
                                             LoadedChuck[key] = true;
                                             Thread.Sleep(50);
                                         }
@@ -96,8 +87,8 @@ namespace EternalLandPlugin.Account
 
         public async void Save() => await DataBase.SaveEPlayer(this);
 
-        public TSPlayer tsp { get { return UserManager.GetTSPlayerFromName(Name, out TSPlayer t) ? t : new TSPlayer(-1); } }
-        public Player plr { get { return tsp.Index == -1 ? new Player() : tsp.TPlayer; } }
+        public TSPlayer tsp { get { return UserManager.GetTSPlayerFromName(Name, out TSPlayer t) ? t : null; } }
+        public Player plr { get { return tsp == null ? null : tsp.TPlayer; } }
 
         #region -- 玩家信息 --
 
@@ -148,7 +139,7 @@ namespace EternalLandPlugin.Account
 
         public long ping = -1;
 
-        public bool Online = false;
+        public bool Online { get { return tsp != null; } }
         #region 饱食度相关字段
 
         double _hungrvalue = 36000;
@@ -178,9 +169,7 @@ namespace EternalLandPlugin.Account
         #region 小游戏字段!
 
         [ShouldSave(Serializable = true)]
-        public List<EItem> Bag;
-
-        public GameInfo gameInfo = new GameInfo();
+        public GameInfo GameInfo = new GameInfo();
         #endregion
         #endregion
 
@@ -189,7 +178,7 @@ namespace EternalLandPlugin.Account
         #region 游戏相关
         public void SendBag(List<EItem> list = null)
         {
-            list = list ?? Bag;
+            list = list ?? (GameInfo.TempCharacter == null ? GameInfo.Character.Bag : GameInfo.TempCharacter.Bag);
             for (int i = 0; i < 260; i++)
             {
                 var item = list[i] ?? new EItem();
@@ -221,16 +210,17 @@ namespace EternalLandPlugin.Account
                 plr.eyeColor = (Color)data.eyeColor;
                 this.SendDataToAll(PacketTypes.PlayerInfo, "", Index);
                 this.SendDataToAll(PacketTypes.PlayerHp, "", Index);
-                this.SendDataToAll(PacketTypes.EffectMana, "", Index);
+                this.SendDataToAll(PacketTypes.PlayerMana, "", Index);
             }
-
         }
 
         public bool ChangeCharacter(string name)
         {
             if (GameData.Character.ContainsKey(name))
             {
+                GameInfo.TempCharacter = GameData.Character[name];
                 SendCharacterData(GameData.Character[name]);
+                UserManager.UpdateInfoToOtherPlayers(this);
                 return true;
             }
             else
@@ -242,12 +232,13 @@ namespace EternalLandPlugin.Account
 
         public void SetToOriginCharacter()
         {
-            tsp.PlayerData.RestoreCharacter(tsp);
-            SendBag();
+            SendCharacterData(GameInfo.Character);
+            GameInfo.TempCharacter = null;
+            UserManager.UpdateInfoToOtherPlayers(this);
         }
         public void BackToOriginMap()
         {
-            gameInfo.MapUUID = Guid.Empty;
+            GameInfo.MapUUID = Guid.Empty;
             tsp.SendData(PacketTypes.WorldInfo, "", 0, 0f, 0f, 0f, 0);
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
@@ -260,11 +251,14 @@ namespace EternalLandPlugin.Account
                     Netplay.Clients[Index].TileSections[i, j] = false;
                 }
             }
-            tsp.Spawn((PlayerSpawnContext)2);
+            tsp.Spawn(PlayerSpawnContext.RecallFromItem);
+            UserManager.UpdateInfoToOtherPlayers(this);
+            MapManager.SendProjectile(this);
         }
-        public void SendMap(Guid uuid)
+        public void JoinMap(Guid uuid)
         {
-            SendEX($"正在传送至世界 {uuid.ToString().Split('-')[0]} , 请稍候...");
+            GameInfo.MapUUID = uuid;
+            SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}],可能会造成片刻卡顿.");
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
             int sectionY = Netplay.GetSectionY(0);
@@ -276,7 +270,6 @@ namespace EternalLandPlugin.Account
                     Netplay.Clients[Index].TileSections[i, j] = false;
                 }
             }
-            gameInfo.MapUUID = uuid;
             GameData.ActiveMap[uuid].Player.Add(ID);
             MapManager.ChangeWorldInfo(this);
             LoadedChuck.Clear();
@@ -287,9 +280,8 @@ namespace EternalLandPlugin.Account
                     LoadedChuck.Add(new Rectangle(rx * MapManager.MapData.ChuckSize, (ry) * MapManager.MapData.ChuckSize, MapManager.MapData.ChuckSize, MapManager.MapData.ChuckSize), false);
                 }
             }
-            EternalLand.OnlineEPlayer.ForEach(e => {
-                if (!gameInfo.Map.Player.Contains(e.ID)) e.tsp.SendData(PacketTypes.PlayerActive, "", Index, 0);
-            });
+            UserManager.UpdateInfoToOtherPlayers(this);
+            MapManager.SendProjectile(this);
             if (!DynamicLoading.IsAlive) DynamicLoading.Start();
         }
 
@@ -314,6 +306,7 @@ namespace EternalLandPlugin.Account
         {
             try
             {
+                if (!Online) return false;
                 TileX = (int)(plr.position.X / 16);
                 TileY = (int)(plr.position.Y / 16);
                 X = (int)plr.position.X;
@@ -444,6 +437,14 @@ namespace EternalLandPlugin.Account
         {
             try { tsp.SendRawData(data); } catch { }
         }
+        public void SendRawDataToAll(byte[] data)
+        {
+            try
+            {
+                EternalLand.OnlineEPlayer.ForEach(e => e.SendRawData(data));
+            }
+            catch { }
+        }
         public void SendDataToAll(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
         {
             if (UserManager.GetTSPlayerFromName(Name, out var tsp))
@@ -453,6 +454,62 @@ namespace EternalLandPlugin.Account
                     NetMessage.SendData((int)msgType, -1, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
                 }
             }
+        }
+        public void SendProjectile(Projectile proj)
+        {
+            var data = new RawDataWriter().SetType(PacketTypes.ProjectileNew);
+            var binaryWriter = data.writer;
+            binaryWriter.Write(proj.projUUID);
+            binaryWriter.WriteVector2(proj.position);
+            binaryWriter.WriteVector2(proj.velocity);
+            binaryWriter.Write(proj.owner);
+            binaryWriter.Write(proj.type);
+            BitsByte bb21 = (byte)0;
+            for (int num17 = 0; num17 < Projectile.maxAI; num17++)
+            {
+                if (proj.ai[num17] != 0f)
+                {
+                    bb21[num17] = true;
+                }
+            }
+            if (proj.damage != 0)
+            {
+                bb21[4] = true;
+            }
+            if (proj.knockBack != 0f)
+            {
+                bb21[5] = true;
+            }
+            if (proj.type > 0 && proj.type < 950 && Terraria.ID.ProjectileID.Sets.NeedsUUID[proj.type])
+            {
+                bb21[7] = true;
+            }
+            binaryWriter.Write(bb21);
+            for (int num18 = 0; num18 < Projectile.maxAI; num18++)
+            {
+                if (bb21[num18])
+                {
+                    binaryWriter.Write(proj.ai[num18]);
+                }
+            }
+            if (bb21[4])
+            {
+                binaryWriter.Write(proj.damage);
+            }
+            if (bb21[5])
+            {
+                binaryWriter.Write(proj.knockBack);
+            }
+            if (bb21[6])
+            {
+                binaryWriter.Write(proj.originalDamage);
+            }
+            if (bb21[7])
+            {
+                binaryWriter.Write(proj.projUUID);
+            }
+            data.writer = binaryWriter;
+            SendRawData(data.GetByteData());
         }
         public override int GetHashCode()
         {
@@ -470,6 +527,10 @@ namespace EternalLandPlugin.Account
 
         [JsonIgnore]
         public MapManager.MapData Map { get { return GameData.ActiveMap.ContainsKey(MapUUID) ? GameData.ActiveMap[MapUUID] : new MapManager.MapData(); } }
+
+        public EPlayerData TempCharacter = new EPlayerData();
+
+        public EPlayerData Character = new EPlayerData();
     }
     [AttributeUsage(AttributeTargets.All, AllowMultiple = false, Inherited = false)]
     public class ShouldSave : Attribute
@@ -503,22 +564,22 @@ namespace EternalLandPlugin.Account
         public EPlayerData(TSPlayer tsp, string name = null)
         {
             Name = name ?? tsp.Name;
-            Life = tsp.TPlayer.statLife;
-            MaxLife = tsp.TPlayer.statLifeMax;
-            Mana = tsp.TPlayer.statMana;
-            MaxMana = tsp.TPlayer.statManaMax;
-            SpawnX = tsp.TPlayer.SpawnX;
-            SpawnY = tsp.TPlayer.SpawnY;
-            skinVariant = tsp.TPlayer.skinVariant;
-            hair = tsp.TPlayer.hair;
-            hairDye = tsp.TPlayer.hairDye;
-            hairColor = tsp.TPlayer.hairColor;
-            pantsColor = tsp.TPlayer.pantsColor;
-            underShirtColor = tsp.TPlayer.underShirtColor;
-            shoeColor = tsp.TPlayer.shoeColor;
-            hideVisibleAccessory = tsp.TPlayer.hideVisibleAccessory;
-            skinColor = tsp.TPlayer.skinColor;
-            eyeColor = tsp.TPlayer.eyeColor;
+            Life = tsp.PlayerData.health;
+            MaxLife = tsp.PlayerData.maxHealth;
+            Mana = tsp.PlayerData.mana;
+            MaxMana = tsp.PlayerData.maxMana;
+            SpawnX = tsp.PlayerData.spawnX;
+            SpawnY = tsp.PlayerData.spawnY;
+            skinVariant = (int)tsp.PlayerData.skinVariant;
+            hair = (int)tsp.PlayerData.hair;
+            hairDye = tsp.PlayerData.hairDye;
+            hairColor = tsp.PlayerData.hairColor;
+            pantsColor = tsp.PlayerData.pantsColor;
+            underShirtColor = tsp.PlayerData.underShirtColor;
+            shoeColor = tsp.PlayerData.shoeColor;
+            hideVisibleAccessory = tsp.PlayerData.hideVisuals;
+            skinColor = tsp.PlayerData.skinColor;
+            eyeColor = tsp.PlayerData.eyeColor;
             var bag = new List<EItem>();
             tsp.TPlayer.inventory.ForEach(i => bag.Add(i == null ? new EItem() : i.ToEItem()));
             bag.Add(tsp.TPlayer.trashItem == null ? new EItem() : tsp.TPlayer.trashItem.ToEItem());
@@ -532,7 +593,6 @@ namespace EternalLandPlugin.Account
             tsp.TPlayer.bank4.item.ForEach(i => bag.Add(i == null ? new EItem() : i.ToEItem()));
             Bag = bag;
         }
-
         public EPlayerData()
         {
             var bag = new List<EItem>();

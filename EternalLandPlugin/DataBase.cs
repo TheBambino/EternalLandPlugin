@@ -24,6 +24,7 @@ namespace EternalLandPlugin
             var eplr = new EPlayer();
             try
             {
+                List<EItem> bag = JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>("Bag"));
                 for (int i = 0; i < reader.Reader.FieldCount; i++)
                 {
                     list.Add(reader.Reader.GetName(i));
@@ -38,7 +39,7 @@ namespace EternalLandPlugin
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
-                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
+                        //else if (type == typeof(List<EItem>)) temp.SetValue(eplr, );
                         else if(type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
@@ -53,9 +54,13 @@ namespace EternalLandPlugin
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
-                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
+ 
                         else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
+                    }
+                    if (UserManager.GetTSPlayerFromID(eplr.ID, out var tsp))
+                    {
+                        eplr.GameInfo.Character = new EPlayerData(tsp) { Bag = bag};
                     }
                 });
             }

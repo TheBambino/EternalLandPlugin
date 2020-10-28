@@ -27,7 +27,7 @@ namespace EternalLandPlugin
 
         public static bool IsGameMode = true;
         public static List<TSPlayer> OnlineTSPlayer { get { return (from p in TShock.Players where p != null select p).ToList(); } }
-        public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null select p).ToList(); } }
+        public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null && p.Online select p).ToList(); } }
 
         public static EPlayer[] EPlayers = new EPlayer[255];
 
@@ -45,6 +45,7 @@ namespace EternalLandPlugin
         {
             Main.ServerSideCharacter = true;
             ServerApi.Hooks.NetGreetPlayer.Register(this, NetProccess.PlayerJoin);
+            ServerApi.Hooks.ServerLeave.Register(this, NetProccess.PlayerLeave);
             ServerApi.Hooks.NetGetData.Register(this, NetProccess.GetData);
             ServerApi.Hooks.WorldSave.Register(this, delegate { DataBase.SaveAllEPlayer(); });
             Hooks.Game.PostUpdate += delegate (ref GameTime gameTime) { EternalLandUpdate(); };
@@ -75,6 +76,7 @@ namespace EternalLandPlugin
                 GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; };
                 GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
+                GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
                 {
@@ -85,9 +87,17 @@ namespace EternalLandPlugin
                 });
 
                 new Thread(new ThreadStart(MapManager.CheckMapAlive)).Start();
+                new Thread(new ThreadStart(delegate {
+                    while (true)
+                    {
+                        Thread.Sleep(1111);
+                        OnlineEPlayer.ForEach(e => {
+                            NetMessage.SendData(4, -1, -1, null, e.Index);
+                            UserManager.SetBag(e);
+                        });
+                    }
+                })).Start();
             }
-
-
             StatusSender.SendStatus();
         }
 
