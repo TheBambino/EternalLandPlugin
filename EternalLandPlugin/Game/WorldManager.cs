@@ -8,6 +8,7 @@ using System.IO.Compression;
 using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
 using Terraria.DataStructures;
@@ -23,16 +24,19 @@ namespace EternalLandPlugin.Game
 {
     public class MapManager
     {
-        public static MapData data = new MapData(2100, 300, 50, 50);
         public class MapData
         {
-            public MapData(Point16 topleft, Point16 bottomright)
+            public MapData(Point16 topleft, Point16 bottomright,string name = "UnKnown", bool keepalive = false)
             {
+                Name = name;
+                KeepAlive = keepalive;
                 ReadTile(topleft.X, topleft.Y, bottomright.X - topleft.X, bottomright.Y - topleft.Y);
             }
 
-            public MapData(int StartX, int StartY, int width, int height)
+            public MapData(int StartX, int StartY, int width, int height, string name = "UnKnown", bool keepalive = false)
             {
+                Name = name;
+                KeepAlive = keepalive;
                 ReadTile(StartX, StartY, width, height);
             }
 
@@ -51,43 +55,55 @@ namespace EternalLandPlugin.Game
                 Height = Main.maxTilesY;
                 StartX = 0;
                 StartY = 0;
-                Tile = new FakeTileProvider(Width, Height);
+                Tile = new FakeTileProvider(0, 0);
             }
 
-            void ReadTile(int StartX, int StartY, int width, int height)
+            async void ReadTile(int StartX, int StartY, int width, int height)
             {
-                Height = height;
-                Width = width;
-                Tile = new FakeTileProvider(width, height);
-                int y = 0;
-                for (int tiley = StartY; y < Height; tiley++)
-                {
-                    int x = 0;
-                    for (int tilex = StartX; x < Width; tilex++)
+                await Task.Run(() => {
+                    Height = height;
+                    Width = width;
+                    Tile = new FakeTileProvider(width, height);
+                    int y = 0;
+                    int chest = 0;
+                    int sign = 0;
+                    for (int tiley = StartY; y < Height; tiley++)
                     {
-                        try
+                        int x = 0;
+                        for (int tilex = StartX; x < Width; tilex++)
                         {
-                            ITile temptile = Main.tile[tilex, tiley] ?? new Tile();
-                            Tile[x, y].CopyFrom(temptile);
-                            if ((TileID.Sets.BasicChest[(int)temptile.type] && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0) || (temptile.type == 88 && temptile.frameX % 54 == 0 && temptile.frameY % 36 == 0))
+                            try
                             {
-                                int chestid = (short)Terraria.Chest.FindChest(tilex, tiley);
-                                if (chestid != -1) Chest.Add(x.ToString() + "," + y.ToString(), Main.chest[chestid]);
+                                ITile temptile = Main.tile[tilex, tiley] ?? new Tile();
+                                Tile[x, y].CopyFrom(temptile);
+                                if ((TileID.Sets.BasicChest[(int)temptile.type] && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0) || (temptile.type == 88 && temptile.frameX % 54 == 0 && temptile.frameY % 36 == 0))
+                                {
+                                    int chestid = (short)Terraria.Chest.FindChest(tilex, tiley);
+                                    var temp = Main.chest[chestid];
+                                    temp.x = x;
+                                    temp.y = y;
+                                    if (chestid != -1) Chest.Add((short)chest, temp);
+                                    chest++;
+                                }
+                                if ((temptile.type == 85 | temptile.type == 55 || temptile.type == 425) && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0)
+                                {
+                                    int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, true);
+                                    var temp = Main.sign[signid];
+                                    temp.x = x;
+                                    temp.y = y;
+                                    if (signid != -1) Sign.Add((short)sign, temp);
+                                    sign++;
+                                }
                             }
-                            if ((temptile.type == 85 | temptile.type == 55 || temptile.type == 425) && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0)
-                            {
-                                int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, true);
-                                if (signid != -1) Sign.Add(x.ToString() + "," + y.ToString(), Main.sign[signid]);
-                            }
-                        }
-                        catch { }
+                            catch { }
 
-                        x++;
+                            x++;
+                        }
+                        y++;
                     }
-                    y++;
-                }
+                });
             }
-            internal void ApplyTiles(ITile[,] Tiles, int AbsoluteX, int AbsoluteY)
+            internal void ApplyTiles(FakeTileProvider Tiles, int AbsoluteX, int AbsoluteY)
             {
                 for (int y = AbsoluteY; y < AbsoluteY + Height; y++)
                 {
@@ -119,48 +135,192 @@ namespace EternalLandPlugin.Game
             /// <param name="realx">玩家所在的X坐标</param>
             /// <param name="realy">玩家所在的Y坐标</param>
             /// <returns></returns>
-            public FakeTileProvider GetChuck(int realx, int realy)
+            public async Task<FakeTileProvider> GetChuck(int realx, int realy)
             {
-                FakeTileProvider tiles = new FakeTileProvider(100, 100);
-                for (int tiley = realy; tiley < realy + 100; tiley++)
-                {
-                    for (int tilex = realx; tilex < realx + 100; tilex++)
-                    {
-                        if (tilex <= StartX + Width && tilex >= StartX && tiley <= StartY + Height && tiley >= StartY)
-                        {
-                            tiles[tilex - realx, tiley - realy].CopyFrom(Tile[tilex - StartX, tiley - StartY]);
-                        }
-                        else
-                        {
-                            tiles[tilex - realx, tiley - realy].CopyFrom(new Tile());
-                        }
-                    }
-                }
-                return tiles;
+                 return await Task.Run(() => {
+                     FakeTileProvider tiles = new FakeTileProvider(ChuckSize, ChuckSize);
+                     for (int tiley = realy; tiley < realy + ChuckSize; tiley++)
+                     {
+                         for (int tilex = realx; tilex < realx + ChuckSize; tilex++)
+                         {
+                             if (tilex < StartX + Width && tilex > StartX && tiley < StartY + Height && tiley > StartY)
+                             {
+                                 tiles[tilex - realx, tiley - realy].CopyFrom(Tile[tilex - StartX, tiley - StartY]);
+                             }
+                             else
+                             {
+                                 tiles[tilex - realx, tiley - realy].CopyFrom(new Tile());
+                             }
+                         }
+                     }
+                     return tiles;
+                 });
             }
+            /// <summary>
+            /// 获取指定坐标在此地图内的相对坐标
+            /// </summary>
+            /// <param name="x"></param>
+            /// <param name="y"></param>
+            /// <param name="RX"></param>
+            /// <param name="RY"></param>
+            /// <returns></returns>
+            public bool GetRelative(int x, int y, out int RX,out int RY)
+            {
+                if (StartX == -1 || StartY == -1)
+                {
+                    RX = -1;
+                    RY = -1;
+                    return false;
+                }
+                else
+                {
+                    RX = StartX <= x ? x - StartX : 0;
+                    RY = StartY <= y ? y - StartY : 0;
+                    return true;
+                }
+            }
+            /// <summary>
+            /// 获取相对坐标在世界内的绝对坐标
+            /// </summary>
+            /// <param name="x"></param>
+            /// <param name="y"></param>
+            /// <param name="AX"></param>
+            /// <param name="AY"></param>
+            /// <returns></returns>
+            public bool GetAbslute(int x, int y, out int AX, out int AY)
+            {
+                if (StartX == -1 || StartY == -1)
+                {
+                    AX = -1;
+                    AY = -1;
+                    return false;
+                }
+                else
+                {
+                    AX = x >= 0 && x < Width ? StartX + x : x < Width ? StartX : StartX + Width;
+                    AY = y >= 0 && x < Height ? StartY + y : y < Height ? StartY : StartY + Height;
+                    return true;
+                }
+            }
+            public void SetSpawn(int relativex, int relativey) => GetAbslute(relativex, relativey, out SpawnX, out SpawnY);
 
+            public int FindChest(int rx, int ry)
+            {
+                var chest = -1;
+                Chest.ForEach(c => { if (c.Value.x == rx && c.Value.y == ry) { chest = c.Key; return; } });
+                return chest;
+            }
+            public int FindSign(int rx, int ry)
+            {
+                var sign = -1;
+                Sign.ForEach(c => { if (c.Value.x == rx && c.Value.y == ry) { sign = c.Key; return; } });
+                return sign;
+            }
+            public string Name = "UnKnown";
+            public bool KeepAlive = false;
+            public static readonly int ChuckSize = 100;
             public bool Origin = false;
             public int StartX = -1;
             public int StartY = -1;
             public int Width;
             public int Height;
-            public Dictionary<string, Chest> Chest = new Dictionary<string, Chest>();
-            public Dictionary<string, Sign> Sign = new Dictionary<string, Sign>();
+            public int SpawnX = -1;
+            public int SpawnY = -1;
+            public List<int> Player = new List<int>();
+            public Dictionary<short, Chest> Chest = new Dictionary<short, Chest>();
+            public Dictionary<short, Sign> Sign = new Dictionary<short, Sign>();
+            public Projectile[] Proj = new Projectile[1000];
+            public NPC[] Npc = new NPC[1000];
             //public ITile[,] Tile;
             public FakeTileProvider Tile
             {
                 get;
                 set;
             }
+
+
+            public int GetNewProjUUID()
+            {
+                int result = 1000;
+                for (int i = 0; i < 1000; i++)
+                {
+                    if (Proj[i] == null)
+                    {
+                        return i;
+                    }
+                    else if (!Proj[i].active)
+                    {
+                        return i;
+                    }
+                }
+                int time = 9999999;
+                for (int i = 0; i < 1000; i++)
+                {
+                    if (Proj[i] != null && !Proj[i].netImportant && Proj[i].timeLeft < time)
+                    {
+                        return i;
+                    }
+                }
+                return result;
+            }
+        }
+        public static bool GetMapFromUUID(Guid uuid, out MapData data)
+        {
+            foreach (var map in GameData.ActiveMap)
+            {
+                if (map.Key == uuid)
+                {
+                    data = map.Value;
+                    return true;
+                }
+            }
+            data = new MapData();
+            return false;
+        }
+        public static Guid CreateMultiPlayerMap(MapData data, int x = -1, int y = -1)
+        {
+            data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
+            data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
+            var uuid = Guid.NewGuid();
+            GameData.ActiveMap.Add(uuid, data);
+            return uuid;
+        }
+        public static void AddPlayerToWorld(EPlayer eplr, Guid uuid)
+        {
+            if (GetMapFromUUID(uuid, out var data) && !data.Player.Contains(eplr.ID))
+            {
+                eplr.SendMap(uuid);
+            }
+        }
+        public static void CheckMapAlive()
+        {
+            Dictionary<Guid, int> check = new Dictionary<Guid, int>();
+            bool restartnow = false;
+            while (true)
+            {
+                restartnow = false;
+                foreach (var map in GameData.ActiveMap)
+                {
+                    if (!check.ContainsKey(map.Key)) check.Add(map.Key, 0);
+                    if (!map.Value.Player.Any()) check[map.Key]++;
+                    if (check[map.Key] > 30)
+                    {
+                        check.Remove(map.Key);
+                        GameData.ActiveMap.Remove(map.Key);
+                        restartnow = true;
+                        Utils.Broadcast($"世界 {map.Key} 已销毁.");
+                        break;
+                    }
+                    check.ForEach(c => { if (!MapManager.GetMapFromUUID(c.Key, out var az)) check.Remove(c.Key); });
+                }
+                if (restartnow) continue;
+                Thread.Sleep(1000);
+            }
         }
         public static void SendMap(EPlayer eplr, MapData data, int x, int y)
         {
             SendMapDerict(eplr, data.Width, data.Height, data, x, y);
             //ChangeWorldInfo(eplr);
-        }
-        public static async void ClearWorld(EPlayer eplr)
-        {
-            eplr.SendMap(new MapData(), 0, 0);
         }
         public static void SendMapDerict(EPlayer eplr, int width, int height, MapData data, int StartX = 0, int StartY = 0)
         {
@@ -417,7 +577,7 @@ namespace EternalLandPlugin.Game
             byte b = 0;
             byte[] array4 = new byte[15];
             ITile tile = null;
-            ITile[,] appliedTiles = GetAppliedTiles(xStart, yStart, width, height, data).Result;
+            var appliedTiles = data.Tile;
             for (int i = yStart; i < yStart + height; i++)
             {
                 for (int j = xStart; j < xStart + width; j++)
@@ -466,7 +626,7 @@ namespace EternalLandPlugin.Game
                         }
                         if (TileID.Sets.BasicChest[tile2.type] && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
                         {
-                            short num7 = (short)Chest.FindChest(j, i);
+                            short num7 = (short)data.FindChest(j - xStart, i - yStart);
                             if (num7 != -1)
                             {
                                 array[num] = num7;
@@ -475,43 +635,19 @@ namespace EternalLandPlugin.Game
                         }
                         if (tile2.type == 88 && tile2.frameX % 54 == 0 && tile2.frameY % 36 == 0)
                         {
-                            short num8 = (short)Chest.FindChest(j, i);
+                            short num8 = (short)data.FindChest(j - xStart, i - yStart);
                             if (num8 != -1)
                             {
                                 array[num] = num8;
                                 num = (short)(num + 1);
                             }
                         }
-                        if (tile2.type == 85 && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
+                        if ((tile2.type == 85 | tile2.type == 55 || tile2.type == 425 || tile2.type == 573) && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
                         {
-                            short num9 = (short)Sign.ReadSign(j, i);
+                            short num9 = (short)data.FindSign(j - xStart, i - yStart);
                             if (num9 != -1)
                             {
                                 array2[num2++] = num9;
-                            }
-                        }
-                        if (tile2.type == 55 && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
-                        {
-                            short num10 = (short)Sign.ReadSign(j, i);
-                            if (num10 != -1)
-                            {
-                                array2[num2++] = num10;
-                            }
-                        }
-                        if (tile2.type == 425 && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
-                        {
-                            short num11 = (short)Sign.ReadSign(j, i);
-                            if (num11 != -1)
-                            {
-                                array2[num2++] = num11;
-                            }
-                        }
-                        if (tile2.type == 573 && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
-                        {
-                            short num12 = (short)Sign.ReadSign(j, i);
-                            if (num12 != -1)
-                            {
-                                array2[num2++] = num12;
                             }
                         }
                         if (tile2.type == 378 && tile2.frameX % 36 == 0 && tile2.frameY == 0)
@@ -750,7 +886,7 @@ namespace EternalLandPlugin.Game
             }
             binaryWriter.Write((short)num4);
             binaryWriter.Write((short)num5);
-            ITile[,] appliedTiles = GetAppliedTiles(X, Y, Size, Size, data).Result;
+            var appliedTiles = data.Tile;
             for (int l = num4; l < num4 + num3; l++)
             {
                 for (int m = num5; m < num5 + num3; m++)
@@ -811,27 +947,6 @@ namespace EternalLandPlugin.Game
                     }
                 }
             }
-        }
-
-        public static async Task<ITile[,]> GetAppliedTiles(int X, int Y, int Width, int Height, MapData data)
-        {
-            return await Task.Run(() =>
-            {
-                ITile[,] array = new ITile[Width, Height];
-                int num = X + Width;
-                int num2 = Y + Height;
-                for (int i = X; i < num; i++)
-                {
-                    for (int j = Y; j < num2; j++)
-                    {
-                        array[i - X, j - Y] = data.Origin ? Main.tile[i, j] : new Tile();
-                    }
-                }
-                data.ApplyTiles(array, X, Y);
-                return array;
-            });
-
-            //return data.Tile;
         }
         #endregion
     }

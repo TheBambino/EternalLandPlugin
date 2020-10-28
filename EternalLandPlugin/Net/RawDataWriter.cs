@@ -111,8 +111,8 @@ namespace EternalLandPlugin.Net
 			return this.memoryStream.ToArray();
 		}
 
-		private MemoryStream memoryStream;
+		public  MemoryStream memoryStream;
 
-		private BinaryWriter writer;
+		public BinaryWriter writer;
 	}
 }

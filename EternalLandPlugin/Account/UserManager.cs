@@ -9,11 +9,6 @@ namespace EternalLandPlugin.Account
 {
     class UserManager
     {
-        public static void GetEPlayerFromID()
-        {
-
-        }
-
         public static EPlayer GetEPlayerFromID(int id)
         {
             EPlayer eplr = null;

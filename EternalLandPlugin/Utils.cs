@@ -78,11 +78,19 @@ namespace EternalLandPlugin
         }
         public static Item GetItemFromTile(int x, int y, OTAPI.Tile.ITile itile)
         {
-            WorldGen.KillTile_GetItemDrops(x, y, itile, out int id, out int stack, out int secondaryitem, out int secondarystack);
             Item item = new Item();
-            item.SetDefaults(id);
-            item.stack = stack;
+            try
+            {
+                WorldGen.KillTile_GetItemDrops(x, y, itile, out int id, out int stack, out int secondaryitem, out int secondarystack);
+                item.SetDefaults(id);
+                item.stack = stack;
+            }
+            catch { }
             return item;
+        }
+        public static void Broadcast(object text,Color color = default, bool allmap = true)
+        {
+            EternalLand.EPlayers.ForEach(eplr => eplr.SendEX(text, color == default ? new Color(212, 239, 245) : color));
         }
         #endregion
     }

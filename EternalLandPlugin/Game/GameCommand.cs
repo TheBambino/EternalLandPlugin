@@ -71,11 +71,12 @@ namespace EternalLandPlugin.Game
                         tsp.SendSuccessEX("执行完成.");
                         break;
                     case "wld":
-                        eplr.SendMap(new MapManager.MapData(2152, 494, 1000, 300), 4200, 450);
-                       
+                        if (cmd.Count > 2) eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394,int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
+                        else eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(eplr.TileX - 25, eplr.TileX - 25, 50, 50), 4100, 400));
+
                         break;
                     case "clear":
-                        Game.MapManager.ClearWorld(eplr);
+                        eplr.SendMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
                         break;
                     case "back":
                         eplr.BackToOriginMap();

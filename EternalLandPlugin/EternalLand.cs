@@ -70,24 +70,11 @@ namespace EternalLandPlugin
             else
             {
                 DataBase.GetAllCharacter();
-                ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendData);
-                ServerApi.Hooks.NetSendData.Register(this,
-                    delegate (SendDataEventArgs args)
-                    {
-                        if (args.MsgId == (PacketTypes)20 || args.MsgId == (PacketTypes)10)
-                        {
-                            /*if (args.remoteClient != -1 && Main.player[args.remoteClient].TSPlayer().EPlayer().IsInAnotherWorld)
-                            {
-                                args.Handled = true;
-                            }*/
-                            Console.WriteLine($"{args.MsgId}:  player - {args.remoteClient} - {args.number} {args.number2} {args.number2} {args.number3} {args.number4} {args.number5} {args.number6}");
-                        }
-                    }
-                    );
-                Hooks.Net.SendBytes += delegate (ref int remoteClient, ref byte[] data, ref int offset, ref int size, ref SocketSendCallback callback, ref object state) { return HookResult.Continue; };
-                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if (args.Player.IsLoggedIn) args.Handled = true; };
-                GetDataHandlers.NewProjectile += GameNet.OnNewProj;
-
+                ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendBytes);
+                ServerApi.Hooks.NetSendData.Register(this,GameNet.OnSendData);
+                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; };
+                GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
+                GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
                 {
@@ -96,7 +83,10 @@ namespace EternalLandPlugin
                 {
                     HelpText = "小遊戲服管理員命令."
                 });
+
+                new Thread(new ThreadStart(MapManager.CheckMapAlive)).Start();
             }
+
 
             StatusSender.SendStatus();
         }
@@ -114,15 +104,14 @@ namespace EternalLandPlugin
 
         protected async void EternalLandUpdate()
         {
-
+            await Task.Run(() =>
+            {
+                OnlineEPlayer.ForEach(e => e.Update());
+            });
         }
 
         protected HookResult PlayerUpdate(Player plr, ref int i)
         {
-            if (plr != null && UserManager.TryGetEPlayeFromName(plr.name, out var eplr))
-            {
-                eplr.Update(plr);
-            }
             return HookResult.Continue;
         }
     }

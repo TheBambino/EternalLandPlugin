@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Drawing;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -9,12 +10,13 @@ using System.Threading.Tasks;
 using System.Timers;
 using EternalLandPlugin.Game;
 using EternalLandPlugin.Net;
-using Microsoft.Xna.Framework;
+using Newtonsoft.Json;
 using Terraria;
 using Terraria.Localization;
 using TShockAPI;
 using TShockAPI.Net;
 using Timer = System.Timers.Timer;
+using Color = Microsoft.Xna.Framework.Color;
 
 namespace EternalLandPlugin.Account
 {
@@ -37,25 +39,22 @@ namespace EternalLandPlugin.Account
                 {
                     try
                     {
-                        int x = 0;
-                        int y = 0;
+                        Thread.Sleep(500);
                         while (true)
                         {
-                            if (IsInAnotherWorld)
+                            if (gameInfo.IsInAnotherWorld)
                             {
                                 try
                                 {
-                                    x = TileX;
-                                    y = TileY;
-                                    var playerrec = new Rectangle(x - 75, y - 75, 150, 150);
-                                    LoadedChuck.Keys.Where(k => k.Intersects(playerrec) && !LoadedChuck[k]).ForEach(rec =>
+                                    foreach (var key in LoadedChuck.Keys)
                                     {
-                                        SendChuck(rec.X, rec.Y, new MapManager.MapData(Map.GetChuck(rec.X, rec.Y) ?? new FakeTileProvider(100, 100), x, y));
-                                        Thread.Sleep(50);
-                                        SendChuck(rec.X, rec.Y, new MapManager.MapData(Map.GetChuck(rec.X, rec.Y) ?? new FakeTileProvider(100, 100), x, y));
-                                        LoadedChuck[rec] = true;
-                                        Log.Info($"{rec.X} {rec.Y}");
-                                    });
+                                        if (!LoadedChuck[key] && key.IntersectsWith(new Rectangle(TileX - 75, TileY - 75, 150, 150)))
+                                        {
+                                            SendChuck(key.X, key.Y, new MapManager.MapData(gameInfo.Map.GetChuck(key.X, key.Y).Result, key.X, key.Y));
+                                            LoadedChuck[key] = true;
+                                            Thread.Sleep(50);
+                                        }
+                                    }
                                 }
                                 catch { }
                             }
@@ -181,12 +180,7 @@ namespace EternalLandPlugin.Account
         [ShouldSave(Serializable = true)]
         public List<EItem> Bag;
 
-        [ShouldSave]
-        public long Point = 0;
-
-        public bool IsInAnotherWorld = false;
-
-        public Game.MapManager.MapData Map = new Game.MapManager.MapData();
+        public GameInfo gameInfo = new GameInfo();
         #endregion
         #endregion
 
@@ -234,9 +228,9 @@ namespace EternalLandPlugin.Account
 
         public bool ChangeCharacter(string name)
         {
-            if (Game.GameData.Character.ContainsKey(name))
+            if (GameData.Character.ContainsKey(name))
             {
-                SendCharacterData(Game.GameData.Character[name]);
+                SendCharacterData(GameData.Character[name]);
                 return true;
             }
             else
@@ -253,13 +247,7 @@ namespace EternalLandPlugin.Account
         }
         public void BackToOriginMap()
         {
-            Map = new MapManager.MapData() { Origin = true };
-            IsInAnotherWorld = false;
-            ResetSection();
-            tsp.Spawn((PlayerSpawnContext)2);
-        }
-        void ResetSection()
-        {
+            gameInfo.MapUUID = Guid.Empty;
             tsp.SendData(PacketTypes.WorldInfo, "", 0, 0f, 0f, 0f, 0);
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
@@ -272,10 +260,11 @@ namespace EternalLandPlugin.Account
                     Netplay.Clients[Index].TileSections[i, j] = false;
                 }
             }
-
+            tsp.Spawn((PlayerSpawnContext)2);
         }
-        public void SendMap(MapManager.MapData data, int x = -1, int y = -1)
+        public void SendMap(Guid uuid)
         {
+            SendEX($"正在传送至世界 {uuid.ToString().Split('-')[0]} , 请稍候...");
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
             int sectionY = Netplay.GetSectionY(0);
@@ -284,22 +273,23 @@ namespace EternalLandPlugin.Account
             {
                 for (int j = sectionY; j <= sectionY2; j++)
                 {
-                    Netplay.Clients[Index].TileSections[i, j] = true;
+                    Netplay.Clients[Index].TileSections[i, j] = false;
                 }
             }
-            IsInAnotherWorld = true;
+            gameInfo.MapUUID = uuid;
+            GameData.ActiveMap[uuid].Player.Add(ID);
             MapManager.ChangeWorldInfo(this);
             LoadedChuck.Clear();
-            for (int ry = 0; ry < 24; ry++)
+            for (int ry = 0; ry < Main.maxTilesY / MapManager.MapData.ChuckSize; ry++)
             {
-                for (int rx = 0; rx < 84; rx++)
+                for (int rx = 0; rx < Main.maxTilesX / MapManager.MapData.ChuckSize; rx++)
                 {
-                    LoadedChuck.Add(new Rectangle(rx * 100, ry * 100, 100, 100), false);
+                    LoadedChuck.Add(new Rectangle(rx * MapManager.MapData.ChuckSize, (ry) * MapManager.MapData.ChuckSize, MapManager.MapData.ChuckSize, MapManager.MapData.ChuckSize), false);
                 }
             }
-            data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
-            data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
-            Map = data;
+            EternalLand.OnlineEPlayer.ForEach(e => {
+                if (!gameInfo.Map.Player.Contains(e.ID)) e.tsp.SendData(PacketTypes.PlayerActive, "", Index, 0);
+            });
             if (!DynamicLoading.IsAlive) DynamicLoading.Start();
         }
 
@@ -311,7 +301,7 @@ namespace EternalLandPlugin.Account
         /// <param name="x">将要发的送到的左上角X坐标</param>
         /// <param name="y">将要发的送到的左上角Y坐标</param>
         /// <param name="data"></param>
-        async void SendChuck(int x, int y, MapManager.MapData data)
+        void SendChuck(int x, int y, MapManager.MapData data)
         {
             MapManager.SendMap(this, data, x, y);
         }
@@ -320,8 +310,7 @@ namespace EternalLandPlugin.Account
         {
             return ID.ToString() == obj.ToString();
         }
-
-        public bool Update(Player plr)
+        public bool Update()
         {
             try
             {
@@ -424,22 +413,18 @@ namespace EternalLandPlugin.Account
             Life += heal;
             tsp.Heal(heal);
         }
-
         public void SendSuccessEX(object text)
         {
             tsp.SendMessage(Expansion.ServerPrefix + text, new Color(120, 194, 96));
         }
-
         public void SendInfoEX(object text)
         {
             tsp.SendMessage(Expansion.ServerPrefix + text, new Color(216, 212, 82));
         }
-
         public void SendErrorEX(object text)
         {
             tsp.SendMessage(Expansion.ServerPrefix + text, new Color(195, 83, 83));
         }
-
         public void SendEX(object text, Color color = default)
         {
             color = color == default ? new Color(212, 239, 245) : color;
@@ -455,12 +440,10 @@ namespace EternalLandPlugin.Account
                 }
             }
         }
-
         public void SendRawData(byte[] data)
         {
             try { tsp.SendRawData(data); } catch { }
         }
-
         public void SendDataToAll(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
         {
             if (UserManager.GetTSPlayerFromName(Name, out var tsp))
@@ -477,12 +460,22 @@ namespace EternalLandPlugin.Account
         }
         #endregion
     }
+    public class GameInfo
+    {
+        public long Point = 0;
+
+        public bool IsInAnotherWorld { get { return MapUUID != Guid.Empty; } }
+
+        public Guid MapUUID = Guid.Empty;
+
+        [JsonIgnore]
+        public MapManager.MapData Map { get { return GameData.ActiveMap.ContainsKey(MapUUID) ? GameData.ActiveMap[MapUUID] : new MapManager.MapData(); } }
+    }
     [AttributeUsage(AttributeTargets.All, AllowMultiple = false, Inherited = false)]
     public class ShouldSave : Attribute
     {
         public bool Serializable = false;
     }
-
     public class EItem
     {
         public EItem()
