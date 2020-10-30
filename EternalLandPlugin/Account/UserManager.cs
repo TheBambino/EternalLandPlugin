@@ -115,6 +115,17 @@ namespace EternalLandPlugin.Account
                 System.Threading.Thread.Sleep(1000);
                 SetCharacter(eplr);
                 SetBag(eplr);
+                
+                if (eplr.GameInfo.IsInAnotherWorld)
+                {
+                    eplr.GameInfo.Map.GetAllPlayers().ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
+                    NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
+                }
+                else
+                {
+                    EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
+                    NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
+                }
             });
         }
 

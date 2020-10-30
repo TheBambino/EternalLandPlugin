@@ -17,6 +17,7 @@ using TShockAPI;
 using TShockAPI.Net;
 using Timer = System.Timers.Timer;
 using Color = Microsoft.Xna.Framework.Color;
+using Point = Microsoft.Xna.Framework.Point;
 
 namespace EternalLandPlugin.Account
 {
@@ -106,6 +107,9 @@ namespace EternalLandPlugin.Account
 
         public int Y = 0;
 
+        public int SpawnX => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnX * 16 : GameInfo.TempCharacter.SpawnX * 16: Main.spawnTileX * 16;
+
+        public int SpawnY => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnY * 16 - 48: GameInfo.TempCharacter.SpawnY * 16 - 48 : Main.spawnTileY * 16 - 48;
         [ShouldSave]
         public long Money = 0;
 
@@ -169,7 +173,13 @@ namespace EternalLandPlugin.Account
         #region 小游戏字段!
 
         [ShouldSave(Serializable = true)]
+        public List<EItem> Bag => GameInfo.TempCharacter == null ? GameInfo.Character.Bag : GameInfo.TempCharacter.Bag;
+
         public GameInfo GameInfo = new GameInfo();
+
+        public int SettingPoint = 0;
+
+        public Point[] ChoosePoint = new Point[2];
         #endregion
         #endregion
 
@@ -251,14 +261,20 @@ namespace EternalLandPlugin.Account
                     Netplay.Clients[Index].TileSections[i, j] = false;
                 }
             }
-            tsp.Spawn(PlayerSpawnContext.RecallFromItem);
+            tsp.Teleport(SpawnX, SpawnY);
             UserManager.UpdateInfoToOtherPlayers(this);
             MapManager.SendProjectile(this);
         }
         public void JoinMap(Guid uuid)
         {
+            if (uuid == Guid.Empty)
+            {
+                SendEX($"返回主世界.");
+                BackToOriginMap();
+                return;
+            }
             GameInfo.MapUUID = uuid;
-            SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}],可能会造成片刻卡顿.");
+            SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}], 可能会造成片刻卡顿.");
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
             int sectionY = Netplay.GetSectionY(0);

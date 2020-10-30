@@ -5,6 +5,7 @@ using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
 using EternalLandPlugin.Account;
+using EternalLandPlugin.Game;
 using Microsoft.Xna.Framework;
 using Terraria;
 using Terraria.Localization;
@@ -76,17 +77,30 @@ namespace EternalLandPlugin
             int number = Item.NewItem((int)x, (int)y, (int)(vector == default ? 0 : vector.X), (int)(vector == default ? 0 : vector.Y), id, stack, true, prefix, true, false);
             NetMessage.SendData(21, -1, -1, null, number);
         }
-        public static Item GetItemFromTile(int x, int y, OTAPI.Tile.ITile itile)
+        public async static Task<List<Item>> GetItemFromTile(int x, int y, OTAPI.Tile.ITile itile, MapManager.MapData map = null)
         {
-            Item item = new Item();
-            try
-            {
-                WorldGen.KillTile_GetItemDrops(x, y, itile, out int id, out int stack, out int secondaryitem, out int secondarystack);
-                item.SetDefaults(id);
-                item.stack = stack;
-            }
-            catch { }
-            return item;
+            return await Task.Run(() => {
+                List<Item> list = new List<Item>(2)
+                {
+                    [0] = new Item(),
+                    [1] = new Item()
+                };
+                try
+                {
+                    int id = 0;
+                    int stack = 0;
+                    int secondaryitem = 0;
+                    int secondarystack = 0;
+                    if (map == null) WorldGen.KillTile_GetItemDrops(x, y, itile, out id, out stack, out secondaryitem, out secondarystack);
+                    else MapTools.KillTile_GetItemDrops(x, y, itile, map, out id, out stack, out secondaryitem, out secondarystack);
+                    list[0].SetDefaults(id);
+                    list[0].stack = stack;
+                    list[1].SetDefaults(id);
+                    list[1].stack = stack;
+                }
+                catch { }
+                return list;
+            });
         }
         public static void Broadcast(object text,Color color = default, bool allmap = true)
         {

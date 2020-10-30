@@ -32,14 +32,14 @@ namespace EternalLandPlugin
                 t.GetProperties(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(temp =>
                 {
                     var attr = temp.GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                    if (list.Contains(temp.Name))
+                    if (list.Contains(temp.Name) && temp.Name != "Bag")
                     {
                         Type type = temp.PropertyType;
                         if (type == typeof(string)) temp.SetValue(eplr, reader.Get<string>(temp.Name));
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
-                        //else if (type == typeof(List<EItem>)) temp.SetValue(eplr, );
+                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
                         else if(type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
@@ -47,14 +47,14 @@ namespace EternalLandPlugin
                 t.GetFields(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly).ForEach(temp =>
                 {
                     var attr = temp.GetCustomAttribute(typeof(ShouldSave), false);  //反射获得用户自定义属性
-                    if (list.Contains(temp.Name))
+                    if (list.Contains(temp.Name) && temp.Name != "Bag")
                     {
                         Type type = temp.FieldType;
                         if (type == typeof(string)) temp.SetValue(eplr, reader.Get<string>(temp.Name));
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
- 
+                        else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
@@ -64,7 +64,7 @@ namespace EternalLandPlugin
                     }
                 });
             }
-            catch (Exception ex) { Log.Error(ex.Message); }
+            catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
             return eplr;
         }
 
@@ -155,7 +155,7 @@ namespace EternalLandPlugin
                     }
                     var reader = RunSql($"UPDATE EternalLand SET {sql} WHERE ID = @0", value.ToArray());
                 }
-                catch (Exception ex) { Log.Error(ex.Message); }
+                catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
             });
         }
 
@@ -189,7 +189,7 @@ namespace EternalLandPlugin
                     }
                     var reader = RunSql($"REPLACE INTO EternalLandData SET {sql}", value.ToArray());
                 }
-                catch (Exception ex) { Log.Error(ex.InnerException.Message + $"\nSQL语句为 {sql}." ); }
+                catch (Exception ex) { Log.Error((ex.InnerException == null ? ex : ex.InnerException) + $"\nSQL语句为 {sql}." ); }
             });
         }
 
@@ -224,7 +224,7 @@ namespace EternalLandPlugin
                             }
                         });
                     }
-                    catch (Exception ex) { Log.Error(ex.Message); }
+                    catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
                     Game.GameData.Character.Add(data.Name, data);
                 }
                 Log.Info($"共载入 {GameData.Character.Count} 条角色数据.");
@@ -245,7 +245,7 @@ namespace EternalLandPlugin
                         var reader = RunSql($"REPLACE INTO EternalLandMap SET Name=@0,Data=@1", new object[] { name, map });
                     }
                 }
-                catch (Exception ex) { Log.Error(ex.InnerException.Message); }
+                catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
             });
         }
 

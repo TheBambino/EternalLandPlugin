@@ -63,7 +63,7 @@
     <Compile Include="Game\GameCommand.cs" />
     <Compile Include="Game\GameData.cs" />
     <Compile Include="Game\GameNet.cs" />
-    <Compile Include="Game\WorldManager.cs" />
+    <Compile Include="Game\MapManager.cs" />
     <Compile Include="Hungr\HungrSystem.cs" />
     <Compile Include="Log.cs" />
     <Compile Include="StatusSender.cs" />

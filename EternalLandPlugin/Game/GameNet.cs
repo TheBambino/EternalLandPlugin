@@ -198,8 +198,37 @@ namespace EternalLandPlugin.Game
             if (eplr != null)
             {
                 args.Handled = true;
-                args.Player.Teleport(eplr.GameInfo.IsInAnotherWorld ? eplr.GameInfo.Map.SpawnX : eplr.GameInfo.TempCharacter == null ? Main.spawnTileX * 16 : eplr.GameInfo.TempCharacter.SpawnX, eplr.GameInfo.IsInAnotherWorld ? eplr.GameInfo.Map.SpawnY : eplr.GameInfo.TempCharacter == null ? Main.spawnTileX * 16 - 48 : eplr.GameInfo.TempCharacter.SpawnY);
+                args.Player.TPlayer.Spawn(args.SpawnContext);
+                args.Player.Teleport(eplr.SpawnX, eplr.SpawnY);
             }
+        }
+
+        public async static void OnTileEdit(object o, GetDataHandlers.TileEditEventArgs args)
+        {
+            await Task.Run(() => {
+                var eplr = args.Player.EPlayer();
+                if (eplr != null)
+                {
+                    if (eplr.SettingPoint != 0)
+                    {
+                        eplr.ChoosePoint[eplr.SettingPoint - 1] = new Point(args.X, args.Y);
+                        if (eplr.SettingPoint == 1)
+                        {
+                            eplr.SendEX($"已进行地图左上角选择 <{(args.X + " - " + args.Y).ToColorful()}>. 请继续选择右下角.");
+                            eplr.SettingPoint = 2;
+                        }
+                        else if(eplr.ChoosePoint[0].X >= args.X || eplr.ChoosePoint[0].Y >= args.Y)
+                        {
+                            eplr.SendErrorEX($"第二个点位 <{(args.X + " - " + args.Y).ToColorful()}> 与第一个点位 <{(eplr.ChoosePoint[0].X + " - " + eplr.ChoosePoint[0].Y).ToColorful()}> 坐标重合或未处于右下角, 请重新选择.");
+                        }
+                        else
+                        {
+                            eplr.SendEX($"已选择全部点位. 请使用 {"//map create <地图名>".ToColorful()} 进行地图创建.");
+                            eplr.SettingPoint = 0;
+                        }
+                    }
+                }
+            });
         }
     }
 }

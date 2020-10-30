@@ -74,6 +74,7 @@ namespace EternalLandPlugin
                 ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendBytes);
                 ServerApi.Hooks.NetSendData.Register(this,GameNet.OnSendData);
                 GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; };
+                TShockAPI.Hooks.PlayerHooks.PlayerCommand += GameCommand.OnPlayerCommand;
                 GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
                 GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
@@ -84,6 +85,13 @@ namespace EternalLandPlugin
                 })
                 {
                     HelpText = "小遊戲服管理員命令."
+                });
+                Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
+                {
+                    "/map"
+                })
+                {
+                    HelpText = "小遊戲服管理員命令 <地图>."
                 });
 
                 new Thread(new ThreadStart(MapManager.CheckMapAlive)).Start();
@@ -100,6 +108,8 @@ namespace EternalLandPlugin
             }
             StatusSender.SendStatus();
         }
+
+        
 
         protected override void Dispose(bool disposing)
         {
