@@ -231,9 +231,9 @@ namespace EternalLandPlugin
             });
         }
 
-        public static async void SaveMap(string name, MapManager.MapData data)
+        public static async Task<bool> SaveMap(string name, MapManager.MapData data)
         {
-            await Task.Run(() =>
+            return await Task.Run(() =>
             {
                 try
                 {
@@ -242,13 +242,38 @@ namespace EternalLandPlugin
                         BinaryFormatter bFormatter = new BinaryFormatter();
                         bFormatter.Serialize(ms, data);
                         byte[] map = ms.ToArray();
-                        var reader = RunSql($"REPLACE INTO EternalLandMap SET Name=@0,Data=@1", new object[] { name, map });
+                        RunSql($"REPLACE INTO EternalLandMap SET Name=@0,Data=@1,Length=@2", new object[] { name, map,map.Length });
+                        return true;
                     }
                 }
                 catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
+                return false;
             });
         }
-
+        public static async void GetAllMap()
+        {
+            await Task.Run(() =>
+            {
+                var reader = RunSql($"SELECT * FROM EternalLandMap");
+                MapManager.MapData data = null;
+                BinaryFormatter formatter = new BinaryFormatter();
+                while (reader.Read())
+                {
+                    string name = reader.Get<string>("Name");
+                    try
+                    {
+                        int FileSize = reader.Reader.GetInt32(reader.Reader.GetOrdinal("Length"));
+                        var rawData = new byte[FileSize];
+                        reader.Reader.GetBytes(reader.Reader.GetOrdinal("Data"), 0, rawData, 0, FileSize);
+                        using MemoryStream mStream = new MemoryStream(rawData);
+                        data = (MapManager.MapData)formatter.Deserialize(mStream);
+                    }
+                    catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
+                    if(data != null) GameData.Map.Add(data.Name, data);
+                }
+                Log.Info($"共载入 {GameData.Map.Count} 条地图数据.");
+            });
+        }
         public static bool UpdateMoney(int id, long money)
         {
             return RunSql($"UPDATE EternalLand SET Money=@0 WHERE ID=@1", new object[]

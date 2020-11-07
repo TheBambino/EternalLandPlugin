@@ -92,7 +92,7 @@ namespace EternalLandPlugin
                     int secondaryitem = 0;
                     int secondarystack = 0;
                     if (map == null) WorldGen.KillTile_GetItemDrops(x, y, itile, out id, out stack, out secondaryitem, out secondarystack);
-                    else MapTools.KillTile_GetItemDrops(x, y, itile, map, out id, out stack, out secondaryitem, out secondarystack);
+                    else map.KillTile_GetItemDrops(x, y, itile, out id, out stack, out secondaryitem, out secondarystack);
                     list[0].SetDefaults(id);
                     list[0].stack = stack;
                     list[1].SetDefaults(id);
@@ -104,8 +104,9 @@ namespace EternalLandPlugin
         }
         public static void Broadcast(object text,Color color = default, bool allmap = true)
         {
-            EternalLand.EPlayers.ForEach(eplr => eplr.SendEX(text, color == default ? new Color(212, 239, 245) : color));
+            EternalLand.OnlineTSPlayer.ForEach(tsp => tsp.SendEX(text, color == default ? new Color(212, 239, 245) : color));
         }
+
         #endregion
     }
 

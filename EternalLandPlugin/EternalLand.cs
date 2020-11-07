@@ -27,7 +27,8 @@ namespace EternalLandPlugin
 
         public static bool IsGameMode = true;
         public static List<TSPlayer> OnlineTSPlayer { get { return (from p in TShock.Players where p != null select p).ToList(); } }
-        public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null && p.Online select p).ToList(); } }
+        public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null select p).ToList(); } }
+        public static List<EPlayer> OnlineEPlayerWhoInMainMap { get { return (from p in EPlayers where p != null && !p.GameInfo.IsInAnotherWorld select p).ToList(); } }
 
         public static EPlayer[] EPlayers = new EPlayer[255];
 
@@ -43,6 +44,7 @@ namespace EternalLandPlugin
         }
         public void PostInitialize(EventArgs args)
         {
+            if (Main.rand == null) Main.rand = new Terraria.Utilities.UnifiedRandom();
             Main.ServerSideCharacter = true;
             ServerApi.Hooks.NetGreetPlayer.Register(this, NetProccess.PlayerJoin);
             ServerApi.Hooks.ServerLeave.Register(this, NetProccess.PlayerLeave);
@@ -70,14 +72,19 @@ namespace EternalLandPlugin
             }
             else
             {
+                
                 DataBase.GetAllCharacter();
+                DataBase.GetAllMap();
                 ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendBytes);
                 ServerApi.Hooks.NetSendData.Register(this,GameNet.OnSendData);
-                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; };
+                ServerApi.Hooks.NetGetData.Register(this, GameNet.OnGetData);
+                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; args.Player.SendData(PacketTypes.PlayerInfo, "", args.Player.Index); };
                 TShockAPI.Hooks.PlayerHooks.PlayerCommand += GameCommand.OnPlayerCommand;
                 GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
                 GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
+                //GetDataHandlers.TileEdit += GameNet.OnTileEdit;
+                GetDataHandlers.PlaceObject += GameNet.OnPlaceObject;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
                 {

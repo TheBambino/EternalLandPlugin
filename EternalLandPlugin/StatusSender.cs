@@ -71,15 +71,19 @@ namespace EternalLandPlugin
             }
         }
 
-        public static void GetPingPakcet(TSPlayer tsp)
+        public async static void GetPingPakcet(TSPlayer tsp)
         {
-            var eplr = tsp.EPlayer();
-            if (eplr != null)
-            { 
-                eplr.ping = eplr.PingChecker.ElapsedMilliseconds == 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
-                eplr.PingChecker.Restart();
-            }
-            tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
+            await Task.Run(() => {
+                var eplr = tsp.EPlayer();
+                if (eplr != null)
+                {
+                    eplr.ping = eplr.PingChecker.ElapsedMilliseconds == 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
+                    Thread.Sleep(200);
+                    eplr.PingChecker.Restart();
+                }
+                
+                tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
+            });  
         }
 
         public static double colornum = 0;

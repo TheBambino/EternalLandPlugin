@@ -42,7 +42,7 @@ namespace EternalLandPlugin.Account
                                     {
                                         if (!LoadedChuck[key] && key.IntersectsWith(new Rectangle(TileX - 75, TileY - 75, 150, 150)))
                                         {
-                                            SendChuck(key.X, key.Y, new MapManager.MapData(GameInfo.Map.GetChuck(key.X, key.Y).Result, key.X, key.Y));
+                                            SendChuck(key.X, key.Y,GameInfo.Map.GetChuck(key.X, key.Y).Result);
                                             LoadedChuck[key] = true;
                                             Thread.Sleep(50);
                                         }
@@ -88,8 +88,11 @@ namespace EternalLandPlugin.Account
 
         public async void Save() => await DataBase.SaveEPlayer(this);
 
-        public TSPlayer tsp { get { return UserManager.GetTSPlayerFromName(Name, out TSPlayer t) ? t : null; } }
-        public Player plr { get { return tsp == null ? null : tsp.TPlayer; } }
+        public TSPlayer tsp
+        {
+            get { try { return UserManager.GetTSPlayerFromName(Name, out TSPlayer t) ? t : null; } catch { return null; } }
+        }
+        public Player plr { get { var t = tsp; return t == null ? null : t.TPlayer; } }
 
         #region -- 玩家信息 --
 
@@ -107,9 +110,9 @@ namespace EternalLandPlugin.Account
 
         public int Y = 0;
 
-        public int SpawnX => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnX * 16 : GameInfo.TempCharacter.SpawnX * 16: Main.spawnTileX * 16;
+        public int SpawnX => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnX * 16 : GameInfo.TempCharacter.SpawnX * 16 : Main.spawnTileX * 16;
 
-        public int SpawnY => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnY * 16 - 48: GameInfo.TempCharacter.SpawnY * 16 - 48 : Main.spawnTileY * 16 - 48;
+        public int SpawnY => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnY * 16 - 48 : GameInfo.TempCharacter.SpawnY * 16 - 48 : Main.spawnTileY * 16 - 48;
         [ShouldSave]
         public long Money = 0;
 
@@ -273,19 +276,12 @@ namespace EternalLandPlugin.Account
                 BackToOriginMap();
                 return;
             }
+            if (GameInfo.MapUUID != Guid.Empty)
+            {
+                GameInfo.Map.Player.Remove(ID);
+            }
             GameInfo.MapUUID = uuid;
             SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}], 可能会造成片刻卡顿.");
-            int sectionX = Netplay.GetSectionX(0);
-            int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
-            int sectionY = Netplay.GetSectionY(0);
-            int sectionY2 = Netplay.GetSectionY(Main.maxTilesY);
-            for (int i = sectionX; i <= sectionX2; i++)
-            {
-                for (int j = sectionY; j <= sectionY2; j++)
-                {
-                    Netplay.Clients[Index].TileSections[i, j] = false;
-                }
-            }
             GameData.ActiveMap[uuid].Player.Add(ID);
             MapManager.ChangeWorldInfo(this);
             LoadedChuck.Clear();
@@ -309,9 +305,13 @@ namespace EternalLandPlugin.Account
         /// <param name="x">将要发的送到的左上角X坐标</param>
         /// <param name="y">将要发的送到的左上角Y坐标</param>
         /// <param name="data"></param>
-        void SendChuck(int x, int y, MapManager.MapData data)
+        public void SendChuck(int x, int y, MapManager.MapData data)
         {
             MapManager.SendMap(this, data, x, y);
+        }
+        public void SendChuck(int x, int y, FakeTileProvider data)
+        {
+            MapManager.SendMap(this, new MapManager.MapData(data, x, y), x, y);
         }
         #endregion
         public override bool Equals(object obj)
@@ -445,7 +445,7 @@ namespace EternalLandPlugin.Account
             {
                 if (!tsp.RealPlayer || tsp.ConnectionAlive)
                 {
-                    NetMessage.SendData((int)msgType, tsp.Index, -1, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
+                    NetMessage.SendData((int)msgType, tsp.Index, 255, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
                 }
             }
         }

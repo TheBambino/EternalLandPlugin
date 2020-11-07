@@ -86,6 +86,12 @@ namespace EternalLandPlugin.Net
 			this.writer.WriteRGB((Color)color);
 			return this;
 		}
+		public RawDataWriter PackVector2(Vector2 v)
+		{
+			this.writer.Write(v.X);
+			this.writer.Write(v.Y);
+			return this;
+		}
 
 		private void UpdateLength()
 		{

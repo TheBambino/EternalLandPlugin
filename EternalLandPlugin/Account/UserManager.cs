@@ -70,7 +70,7 @@ namespace EternalLandPlugin.Account
         public static bool GetTSPlayerFromName(string name, out TSPlayer tsp)
         {
             tsp = null;
-            foreach (var t in from t in EternalLand.OnlineTSPlayer where t.Name == name select t)
+            foreach (var t in from t in TShock.Players where t!= null && t.Name == name select t)
             {
                 tsp = t;
                 return true;

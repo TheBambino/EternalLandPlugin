@@ -26,6 +26,11 @@ namespace EternalLandPlugin.Game
         {
             var tsp = args.Player;
             var eplr = tsp.EPlayer();
+            if(eplr == null)
+            {
+                tsp.SendErrorEX("你尚未登录.");
+                return;
+            } 
             string error = "命令無效. ";
             var cmd = args.Parameters;
             switch (args.Message.Split(' ')[0].ToLower())
@@ -85,23 +90,7 @@ namespace EternalLandPlugin.Game
                                 eplr.SetToOriginCharacter();
                                 tsp.SendSuccessEX("执行完成.");
                                 break;
-                            case "wld":
-                                if (cmd.Count > 2) eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394, int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
-                                else eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(eplr.TileX - 25, eplr.TileX - 25, 50, 50), 4100, 400));
-
-                                break;
-                            case "clear":
-                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
-                                break;
-                            case "back":
-                                eplr.BackToOriginMap();
-                                break;
-                            case "join":
-                                if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var t))
-                                {
-                                    eplr.JoinMap(t[0].GameInfo.MapUUID);
-                                }
-                                break;
+                            
                         }
                     }
                     break;
@@ -142,24 +131,46 @@ namespace EternalLandPlugin.Game
                                     tsp.SendErrorEX($"此地图名已存在. 如想更新地图请使用 {"//map update".ToColorful()}.");
                                     break;
                                 }
-                                var data = new MapManager.MapData(eplr.ChoosePoint[0], eplr.ChoosePoint[1]);
-                                DataBase.SaveMap(cmd[1], data);
-                                GameData.Map.Add(cmd[1], data);
-                                tsp.SendSuccessEX("执行完成.");
+                                var data = new MapManager.MapData(eplr.ChoosePoint[0], eplr.ChoosePoint[1], cmd[1]);
+                                if (DataBase.SaveMap(cmd[1], data).Result)
+                                {
+                                    GameData.Map.Add(cmd[1], data);
+                                    tsp.SendSuccessEX("执行完成.");
+                                }
+                                else
+                                {
+                                    tsp.SendErrorEX($"发生错误, 详细信息请查看控制台.");
+                                }
                                 break;
                             case "goto":
-                                if (cmd.Count < 2)
+                                if (cmd.Count < 4)
                                 {
-                                    tsp.SendErrorEX(error);
+                                    tsp.SendErrorEX(error + ", 需包含生成到的坐标");
                                     break;
                                 }
-                                else if (!GameData.Character.ContainsKey(cmd[1]))
+                                else if (!GameData.Map.ContainsKey(cmd[1]))
                                 {
                                     tsp.SendErrorEX($"未找到地图: {cmd[1]}");
                                     break;
                                 }
-                                eplr.ChangeCharacter(cmd[1]);
+                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
                                 tsp.SendSuccessEX("执行完成.");
+                                break;
+                            case "wld":
+                                if (cmd.Count > 2) eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394, int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
+                                else eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(int.Parse(cmd[1]), int.Parse(cmd[2]), 200, 200), 4100, 450));
+                                break;
+                            case "clear":
+                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
+                                break;
+                            case "back":
+                                eplr.BackToOriginMap();
+                                break;
+                            case "join":
+                                if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var t))
+                                {
+                                    eplr.JoinMap(t[0].GameInfo.MapUUID);
+                                }
                                 break;
                         }
                     }

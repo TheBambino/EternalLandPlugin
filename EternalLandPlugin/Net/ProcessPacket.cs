@@ -15,6 +15,7 @@ using Terraria.Localization;
 using Terraria.Net.Sockets;
 using TerrariaApi.Server;
 using TShockAPI;
+using TShockAPI.DB;
 using TShockAPI.Hooks;
 
 namespace EternalLandPlugin.Net
@@ -94,11 +95,13 @@ namespace EternalLandPlugin.Net
         {
             var plr = Main.player[args.Who];
             var tsp = plr.TSPlayer();
-            if (tsp.Account != null)
-            {
-                var eplr = DataBase.GetEPlayer(tsp.Account.ID).Result;
+            UserAccount userAccount = TShock.UserAccounts.GetUserAccountByName(tsp.Name);
+            var eplr = userAccount == null ? null : DataBase.GetEPlayer(userAccount.ID).Result;
+            if (eplr != null)
+            {                
                 EternalLand.EPlayers[args.Who] = eplr;
                 eplr.SendBag();
+                Log.Info($"玩家 {eplr.Name} 数据已读取.");
                 if (eplr.Name == "咕咕咕") eplr.ChangeCharacter("y0");
             }
             tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
@@ -115,6 +118,7 @@ namespace EternalLandPlugin.Net
                 tsp.EPlayer().Save();
                 EternalLand.EPlayers[args.Who].Dispose();
                 EternalLand.EPlayers[args.Who] = null;
+                Log.Info($"玩家 {eplr.Name} 数据已保存.");
             }            
         }
 
