@@ -116,9 +116,9 @@ namespace EternalLandPlugin.Account
                 SetCharacter(eplr);
                 SetBag(eplr);
                 
-                if (eplr.GameInfo.IsInAnotherWorld)
+                if (eplr.IsInAnotherWorld)
                 {
-                    eplr.GameInfo.Map.GetAllPlayers().ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
+                    eplr.Map.GetAllPlayers().ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
                     NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
                 }
                 else
@@ -131,20 +131,20 @@ namespace EternalLandPlugin.Account
 
         public static void SetBag(EPlayer eplr)
         {
-            var list = eplr.GameInfo.TempCharacter == null ? eplr.GameInfo.Character.Bag : eplr.GameInfo.TempCharacter.Bag;
+            var list = eplr.TempCharacter == null ? eplr.Character.Bag : eplr.TempCharacter.Bag;
             for (int i = 0; i < 260; i++)
             {
                 var item = list[i] ?? new EItem();
                 EternalLand.OnlineEPlayer.ForEach(e =>
                 {
-                    if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.Stack).PackByte((byte)item.Prefix).PackInt16((short)item.ID).GetByteData());
+                    if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData());
                 });
             }
         }
 
         public static void SetPlayerActive(EPlayer eplr)
         {
-            if (MapManager.GetMapFromUUID(eplr.GameInfo.MapUUID, out var map) && eplr.GameInfo.MapUUID != Guid.Empty)
+            if (MapManager.GetMapFromUUID(eplr.MapUUID, out var map) && eplr.MapUUID != Guid.Empty)
             {
                 EternalLand.OnlineEPlayer.ForEach(e =>
                 {
@@ -161,8 +161,8 @@ namespace EternalLandPlugin.Account
                 {
                     if (e != eplr)
                     {
-                        e.tsp.SendData(PacketTypes.PlayerActive, "", eplr.Index, e.GameInfo.MapUUID == eplr.GameInfo.MapUUID ? 1 : 0);
-                        eplr.SendData(PacketTypes.PlayerActive, "", e.Index, e.GameInfo.MapUUID == eplr.GameInfo.MapUUID ? 1 : 0);
+                        e.tsp.SendData(PacketTypes.PlayerActive, "", eplr.Index, e.MapUUID == eplr.MapUUID ? 1 : 0);
+                        eplr.SendData(PacketTypes.PlayerActive, "", e.Index, e.MapUUID == eplr.MapUUID ? 1 : 0);
                     }                   
                 });
             }

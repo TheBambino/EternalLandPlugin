@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Data;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -12,6 +13,8 @@ using Newtonsoft.Json;
 using TShockAPI;
 using TShockAPI.DB;
 using static EternalLandPlugin.Account.EPlayer;
+using MessagePack;
+using EternalLandPlugin.Net;
 
 namespace EternalLandPlugin
 {
@@ -39,8 +42,9 @@ namespace EternalLandPlugin
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
+                        else if (type == typeof(Guid)) temp.SetValue(eplr, Guid.Parse(reader.Get<string>(temp.Name)));
                         else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
-                        else if(type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
+                        else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
                 });
@@ -54,17 +58,18 @@ namespace EternalLandPlugin
                         else if (type == typeof(long)) temp.SetValue(eplr, reader.Get<long>(temp.Name));
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
+                        else if (type == typeof(Guid)) temp.SetValue(eplr, Guid.Parse(reader.Get<string>(temp.Name)));
                         else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
                     }
                     if (UserManager.GetTSPlayerFromID(eplr.ID, out var tsp))
                     {
-                        eplr.GameInfo.Character = new EPlayerData(tsp) { Bag = bag};
+                        eplr.Character = new EPlayerData(tsp) { Bag = bag };
                     }
                 });
             }
-            catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
+            catch (Exception ex) { Log.Error((ex.InnerException == null ? ex : ex.InnerException)); }
             return eplr;
         }
 
@@ -182,14 +187,14 @@ namespace EternalLandPlugin
                     {
                         sql += $"{(num == 0 ? "" : ",")}{field[i].Name}=@{num}";
                         if (field[i].FieldType == typeof(Microsoft.Xna.Framework.Color?)) value.Add(TShock.Utils.EncodeColor((Microsoft.Xna.Framework.Color?)field[i].GetValue(data)));
-                        else if(field[i].FieldType == typeof(List<EItem>)) value.Add(JsonConvert.SerializeObject(field[i].GetValue(data)));
+                        else if (field[i].FieldType == typeof(List<EItem>)) value.Add(JsonConvert.SerializeObject(field[i].GetValue(data)));
                         else if (field[i].FieldType == typeof(bool[])) value.Add(JsonConvert.SerializeObject(field[i].GetValue(data)));
                         else value.Add(field[i].GetValue(data));
                         num++;
                     }
                     var reader = RunSql($"REPLACE INTO EternalLandData SET {sql}", value.ToArray());
                 }
-                catch (Exception ex) { Log.Error((ex.InnerException == null ? ex : ex.InnerException) + $"\nSQL语句为 {sql}." ); }
+                catch (Exception ex) { Log.Error((ex.InnerException == null ? ex : ex.InnerException) + $"\nSQL语句为 {sql}."); }
             });
         }
 
@@ -237,13 +242,35 @@ namespace EternalLandPlugin
             {
                 try
                 {
-                    using (MemoryStream ms = new MemoryStream())
+                    System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
+                    alltime.Start();
+                    byte[] map = MessagePackSerializer.Serialize(value: data, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
+                    alltime.Stop();
+                    Log.Info($"耗时 {alltime.ElapsedMilliseconds} ms, 文件大小为 {Math.Round(((double)map.Length) / 1024 / 1024, 4)} MB, 地图大小为 {data.Width} * {data.Height}.\n开始上传至数据库.");
+                    IDbConnection dbConnection = TShock.DB.CloneEx();
+                    QueryResult result;
+                    try
                     {
-                        BinaryFormatter bFormatter = new BinaryFormatter();
-                        bFormatter.Serialize(ms, data);
-                        byte[] map = ms.ToArray();
-                        RunSql($"REPLACE INTO EternalLandMap SET Name=@0,Data=@1,Length=@2", new object[] { name, map,map.Length });
-                        return true;
+                        dbConnection.Open();
+                        using (IDbCommand dbCommand = dbConnection.CreateCommand())
+                        {
+                            var args = new object[] { name, map, map.Length };
+                            dbCommand.CommandText = $"REPLACE INTO EternalLandMap SET Name=@0,Data=@1,Length=@2";
+                            for (int i = 0; i < args.Length; i++)
+                            {
+                                dbCommand.AddParameter("@" + i.ToString(), args[i]);
+                            }
+                            dbCommand.CommandTimeout = 60000;
+                            result = new QueryResult(dbConnection, dbCommand.ExecuteReader());
+                            Log.Info("上传完成.");
+                            if(!Game.GameData.Map.ContainsKey(name)) GameData.Map.Add(name, map);
+                            return true;
+                        }
+                    }
+                    catch (Exception innerException)
+                    {
+                        Log.Error("Fatal TShock initialization exception: failed to connect to MySQL database. See inner exception for details.\n" + innerException);
+                        return false;
                     }
                 }
                 catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
@@ -254,9 +281,12 @@ namespace EternalLandPlugin
         {
             await Task.Run(() =>
             {
+                Log.Info($"正在读入地图.");
                 var reader = RunSql($"SELECT * FROM EternalLandMap");
-                MapManager.MapData data = null;
-                BinaryFormatter formatter = new BinaryFormatter();
+                //BinaryFormatter formatter = new BinaryFormatter();
+                Log.Info($"开始反序列化地图.");
+                System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
+                alltime.Start();
                 while (reader.Read())
                 {
                     string name = reader.Get<string>("Name");
@@ -265,13 +295,12 @@ namespace EternalLandPlugin
                         int FileSize = reader.Reader.GetInt32(reader.Reader.GetOrdinal("Length"));
                         var rawData = new byte[FileSize];
                         reader.Reader.GetBytes(reader.Reader.GetOrdinal("Data"), 0, rawData, 0, FileSize);
-                        using MemoryStream mStream = new MemoryStream(rawData);
-                        data = (MapManager.MapData)formatter.Deserialize(mStream);
+                        GameData.Map.Add(name, rawData);
                     }
-                    catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
-                    if(data != null) GameData.Map.Add(data.Name, data);
+                    catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); continue; }
                 }
-                Log.Info($"共载入 {GameData.Map.Count} 条地图数据.");
+                alltime.Stop();
+                Log.Info($"共载入 {GameData.Map.Count} 条地图数据, 共耗时 {alltime.ElapsedMilliseconds} ms.");
             });
         }
         public static bool UpdateMoney(int id, long money)

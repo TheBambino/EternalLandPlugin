@@ -1,0 +1,16 @@
+﻿[*.cs]
+
+# MsgPack003: Use MessagePackObjectAttribute
+dotnet_diagnostic.MsgPack003.severity = error
+
+# MsgPack004: Attribute public members of MessagePack objects
+dotnet_diagnostic.MsgPack004.severity = error
+
+# MsgPack005: MessagePackObject validation
+dotnet_diagnostic.MsgPack005.severity = error
+
+# MsgPack002: Avoid mutable static options
+dotnet_diagnostic.MsgPack002.severity = warning
+
+# MsgPack001: Avoid mutable default options
+dotnet_diagnostic.MsgPack001.severity = warning

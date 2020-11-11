@@ -103,6 +103,7 @@ namespace EternalLandPlugin.Net
                 eplr.SendBag();
                 Log.Info($"玩家 {eplr.Name} 数据已读取.");
                 if (eplr.Name == "咕咕咕") eplr.ChangeCharacter("y0");
+                UserManager.SetPlayerActive(eplr);
             }
             tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
             //tsp.SendData(PacketTypes.TileFrameSection, "", 0, 0, 1000,1000);

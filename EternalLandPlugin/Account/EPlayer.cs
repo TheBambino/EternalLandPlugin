@@ -18,6 +18,7 @@ using TShockAPI.Net;
 using Timer = System.Timers.Timer;
 using Color = Microsoft.Xna.Framework.Color;
 using Point = Microsoft.Xna.Framework.Point;
+using MessagePack;
 
 namespace EternalLandPlugin.Account
 {
@@ -34,7 +35,7 @@ namespace EternalLandPlugin.Account
                         Thread.Sleep(500);
                         while (true)
                         {
-                            if (GameInfo.IsInAnotherWorld)
+                            if (IsInAnotherWorld)
                             {
                                 try
                                 {
@@ -42,7 +43,7 @@ namespace EternalLandPlugin.Account
                                     {
                                         if (!LoadedChuck[key] && key.IntersectsWith(new Rectangle(TileX - 75, TileY - 75, 150, 150)))
                                         {
-                                            SendChuck(key.X, key.Y,GameInfo.Map.GetChuck(key.X, key.Y).Result);
+                                            SendChuck(key.X, key.Y,Map.GetChuck(key.X, key.Y).Result);
                                             LoadedChuck[key] = true;
                                             Thread.Sleep(50);
                                         }
@@ -110,9 +111,9 @@ namespace EternalLandPlugin.Account
 
         public int Y = 0;
 
-        public int SpawnX => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnX * 16 : GameInfo.TempCharacter.SpawnX * 16 : Main.spawnTileX * 16;
+        public int SpawnX => IsInAnotherWorld ? TempCharacter == null ? Character.SpawnX * 16 : TempCharacter.SpawnX * 16 : Main.spawnTileX * 16;
 
-        public int SpawnY => GameInfo.IsInAnotherWorld ? GameInfo.TempCharacter == null ? GameInfo.Character.SpawnY * 16 - 48 : GameInfo.TempCharacter.SpawnY * 16 - 48 : Main.spawnTileY * 16 - 48;
+        public int SpawnY => IsInAnotherWorld ? TempCharacter == null ? Character.SpawnY * 16 - 48 : TempCharacter.SpawnY * 16 - 48 : Main.spawnTileY * 16 - 48;
         [ShouldSave]
         public long Money = 0;
 
@@ -176,12 +177,18 @@ namespace EternalLandPlugin.Account
         #region 小游戏字段!
 
         [ShouldSave(Serializable = true)]
-        public List<EItem> Bag => GameInfo.TempCharacter == null ? GameInfo.Character.Bag : GameInfo.TempCharacter.Bag;
-
-        public GameInfo GameInfo = new GameInfo();
+        public List<EItem> Bag => TempCharacter == null ? Character.Bag : TempCharacter.Bag;
+        [ShouldSave]
+        public long Point = 0;
+        public bool IsInAnotherWorld { get { return MapUUID != Guid.Empty; } }
+        public Guid MapUUID = Guid.Empty;        
+        public MapManager.MapData Map { get { return GameData.ActiveMap.ContainsKey(MapUUID) ? GameData.ActiveMap[MapUUID] : new MapManager.MapData(); } }
+        public EPlayerData TempCharacter = new EPlayerData();
+        public EPlayerData Character = new EPlayerData();
+        [ShouldSave]
+        public Guid TerritoryUUID = Guid.Empty;
 
         public int SettingPoint = 0;
-
         public Point[] ChoosePoint = new Point[2];
         #endregion
         #endregion
@@ -191,11 +198,11 @@ namespace EternalLandPlugin.Account
         #region 游戏相关
         public void SendBag(List<EItem> list = null)
         {
-            list = list ?? (GameInfo.TempCharacter == null ? GameInfo.Character.Bag : GameInfo.TempCharacter.Bag);
+            list = list ?? (TempCharacter == null ? Character.Bag : TempCharacter.Bag);
             for (int i = 0; i < 260; i++)
             {
                 var item = list[i] ?? new EItem();
-                tsp.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)Index).PackInt16((short)i).PackInt16((short)item.Stack).PackByte((byte)item.Prefix).PackInt16((short)item.ID).GetByteData());
+                tsp.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData());
             }
         }
 
@@ -231,7 +238,7 @@ namespace EternalLandPlugin.Account
         {
             if (GameData.Character.ContainsKey(name))
             {
-                GameInfo.TempCharacter = GameData.Character[name];
+                TempCharacter = GameData.Character[name];
                 SendCharacterData(GameData.Character[name]);
                 UserManager.UpdateInfoToOtherPlayers(this);
                 return true;
@@ -245,13 +252,17 @@ namespace EternalLandPlugin.Account
 
         public void SetToOriginCharacter()
         {
-            SendCharacterData(GameInfo.Character);
-            GameInfo.TempCharacter = null;
+            SendCharacterData(Character);
+            TempCharacter = null;
             UserManager.UpdateInfoToOtherPlayers(this);
         }
         public void BackToOriginMap()
         {
-            GameInfo.MapUUID = Guid.Empty;
+            if (MapUUID != Guid.Empty)
+            {
+                Map.Player.Remove(ID);
+            }
+            MapUUID = Guid.Empty;
             tsp.SendData(PacketTypes.WorldInfo, "", 0, 0f, 0f, 0f, 0);
             int sectionX = Netplay.GetSectionX(0);
             int sectionX2 = Netplay.GetSectionX(Main.maxTilesX);
@@ -276,11 +287,11 @@ namespace EternalLandPlugin.Account
                 BackToOriginMap();
                 return;
             }
-            if (GameInfo.MapUUID != Guid.Empty)
+            if (MapUUID != Guid.Empty)
             {
-                GameInfo.Map.Player.Remove(ID);
+                Map.Player.Remove(ID);
             }
-            GameInfo.MapUUID = uuid;
+            MapUUID = uuid;
             SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}], 可能会造成片刻卡顿.");
             GameData.ActiveMap[uuid].Player.Add(ID);
             MapManager.ChangeWorldInfo(this);
@@ -439,13 +450,13 @@ namespace EternalLandPlugin.Account
             color = color == default ? new Color(212, 239, 245) : color;
             tsp.SendMessage(Expansion.ServerPrefix + text, color);
         }
-        public void SendData(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
+        public void SendData(PacketTypes msgType, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0, int number6 = 0, int number7 = 0)
         {
             if (UserManager.GetTSPlayerFromName(Name, out var tsp))
             {
                 if (!tsp.RealPlayer || tsp.ConnectionAlive)
                 {
-                    NetMessage.SendData((int)msgType, tsp.Index, 255, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
+                    NetMessage.SendData((int)msgType, tsp.Index, 255, NetworkText.FromLiteral(text), number, number2, number3, number4, number5, number6, number7);
                 }
             }
         }
@@ -533,47 +544,50 @@ namespace EternalLandPlugin.Account
         }
         #endregion
     }
-    public class GameInfo
-    {
-        public long Point = 0;
-
-        public bool IsInAnotherWorld { get { return MapUUID != Guid.Empty; } }
-
-        public Guid MapUUID = Guid.Empty;
-
-        [JsonIgnore]
-        public MapManager.MapData Map { get { return GameData.ActiveMap.ContainsKey(MapUUID) ? GameData.ActiveMap[MapUUID] : new MapManager.MapData(); } }
-
-        public EPlayerData TempCharacter = new EPlayerData();
-
-        public EPlayerData Character = new EPlayerData();
-    }
     [AttributeUsage(AttributeTargets.All, AllowMultiple = false, Inherited = false)]
     public class ShouldSave : Attribute
     {
         public bool Serializable = false;
     }
+    [MessagePack.MessagePackObject]
+    [Serializable]
     public class EItem
     {
+        [SerializationConstructor]
         public EItem()
         {
         }
         public EItem(Item item)
         {
-            ID = item.netID;
-            Stack = item.stack;
-            Prefix = item.prefix;
+            type = item.netID;
+            stack = item.stack;
+            prefix = item.prefix;
         }
         public EItem(int id, int stack, int prefix)
         {
-            ID = id;
-            Stack = stack;
-            Prefix = prefix;
+            type = id;
+            this.stack = stack;
+            this.prefix = prefix;
         }
+        [Key(0)]
+        public int type = 0;
+        [Key(1)]
+        public int stack = 0;
+        [Key(2)]
+        public int prefix = 0;
 
-        public int ID = 0;
-        public int Stack = 0;
-        public int Prefix = 0;
+        public static implicit operator EItem(Terraria.Item v)
+        {
+            return new EItem(v.netID, v.stack, v.prefix);
+        }
+        public static implicit operator Terraria.Item(EItem v)
+        {
+            var item = new Item();
+            item.SetDefaults(v.type);
+            item.stack = v.stack;
+            item.prefix = (byte)v.prefix;
+            return item;
+        }
     }
     public class EPlayerData
     {

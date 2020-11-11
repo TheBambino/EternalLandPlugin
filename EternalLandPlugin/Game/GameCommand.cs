@@ -1,4 +1,5 @@
 ﻿using EternalLandPlugin.Account;
+using MessagePack;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -13,24 +14,47 @@ namespace EternalLandPlugin.Game
     {
         public static void OnPlayerCommand(TShockAPI.Hooks.PlayerCommandEventArgs args)
         {
-            switch (args.CommandName)
+            var eplr = args.Player.EPlayer();
+            var cmd = args.Parameters;
+            if (eplr != null)
             {
-                case "home":
-                    args.Handled = true;
-                    args.Player.Teleport((float)(Main.spawnTileX * 16), (float)(Main.spawnTileY * 16 - 48), 1);
-                    break;
+                switch (args.CommandName.ToLower())
+                {
+                    case "home":
+                        args.Handled = true;
+                        args.Player.Teleport((float)(Main.spawnTileX * 16), (float)(Main.spawnTileY * 16 - 48), 1);
+                        break;
+                    case "tp":
+                        if (cmd.Count >= 1)
+                        {
+                            var temptp = TSPlayer.FindByNameOrID(cmd[0]);
+                            if (temptp.Count > 1)
+                            {
+                                eplr.tsp.SendMultipleError(temptp);
+                                args.Handled = true;
+                                return;
+                            }
+                            else if (temptp.Any() && temptp[0].EPlayer() != null && eplr.MapUUID != temptp[0].EPlayer().MapUUID)
+                            {
+                                eplr.SendErrorEX($"你无法直接传送至位于其他世界的玩家.");
+                                args.Handled = true;
+                            }
+                        }
+
+                        break;
+                }
             }
         }
 
-        public static void AdminCommand(CommandArgs args)
+        public async static void AdminCommand(CommandArgs args)
         {
             var tsp = args.Player;
             var eplr = tsp.EPlayer();
-            if(eplr == null)
+            if (eplr == null)
             {
                 tsp.SendErrorEX("你尚未登录.");
                 return;
-            } 
+            }
             string error = "命令無效. ";
             var cmd = args.Parameters;
             switch (args.Message.Split(' ')[0].ToLower())
@@ -90,7 +114,7 @@ namespace EternalLandPlugin.Game
                                 eplr.SetToOriginCharacter();
                                 tsp.SendSuccessEX("执行完成.");
                                 break;
-                            
+
                         }
                     }
                     break;
@@ -116,6 +140,12 @@ namespace EternalLandPlugin.Game
                                     tsp.SendErrorEX(error);
                                     break;
                                 }
+                                else if (cmd[1] == "MainWorld")
+                                {
+                                    var d = new MapManager.MapData(0, 0, Main.maxTilesX, Main.maxTilesY, cmd[1]);
+                                    if (DataBase.SaveMap(cmd[1], d).Result) tsp.SendSuccessEX("执行完成.");
+                                    return;
+                                }
                                 else if (eplr.SettingPoint != 0)
                                 {
                                     tsp.SendErrorEX($"你正在选择第 {eplr.SettingPoint} 个点位, 无法创建地图.");
@@ -134,7 +164,6 @@ namespace EternalLandPlugin.Game
                                 var data = new MapManager.MapData(eplr.ChoosePoint[0], eplr.ChoosePoint[1], cmd[1]);
                                 if (DataBase.SaveMap(cmd[1], data).Result)
                                 {
-                                    GameData.Map.Add(cmd[1], data);
                                     tsp.SendSuccessEX("执行完成.");
                                 }
                                 else
@@ -153,7 +182,7 @@ namespace EternalLandPlugin.Game
                                     tsp.SendErrorEX($"未找到地图: {cmd[1]}");
                                     break;
                                 }
-                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
+                                eplr.JoinMap(await MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
                                 tsp.SendSuccessEX("执行完成.");
                                 break;
                             case "wld":
@@ -169,15 +198,56 @@ namespace EternalLandPlugin.Game
                             case "join":
                                 if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var t))
                                 {
-                                    eplr.JoinMap(t[0].GameInfo.MapUUID);
+                                    eplr.JoinMap(t[0].MapUUID);
+
                                 }
                                 break;
                         }
                     }
                     break;
             }
+        }
+        public static void Territory(CommandArgs args)
+        {
+            var tsp = args.Player;
+            var eplr = tsp.EPlayer();
+            string error = "命令無效. ";
+            var cmd = args.Parameters;
+            if (eplr == null)
+            {
+                tsp.SendErrorEX("你尚未登录.");
+                //return;
+            }
+            else if (cmd.Count < 1)
+            {
+                tsp.SendErrorEX(error + "请输入/territory(属地, sd) help 查看命令");
+                return;
+            }
             
-            
+            switch (cmd[0].ToLower())
+            {
+                case "create":
+
+                    break;
+                case "1":
+                    try {
+                        var az = new FakeTileProvider(10, 10);
+                        for (int y = 0; y < 10; y++)
+                        {
+                            for (int x = 0; x < 10; x++)
+                            {
+                                az[x, y] = new Tile() { type = 20 };
+                            }
+                        }
+                        var za = MessagePackSerializer.Deserialize<FakeTileProvider>(MessagePackSerializer.Serialize(az, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block)), MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
+                    }
+                    catch (Exception ex) { Utils.Broadcast(ex);
+                        Console.WriteLine(ex);
+                    }
+                    
+                    
+                    break;
+            }
         }
     }
 }

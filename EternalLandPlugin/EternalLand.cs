@@ -28,7 +28,7 @@ namespace EternalLandPlugin
         public static bool IsGameMode = true;
         public static List<TSPlayer> OnlineTSPlayer { get { return (from p in TShock.Players where p != null select p).ToList(); } }
         public static List<EPlayer> OnlineEPlayer { get { return (from p in EPlayers where p != null select p).ToList(); } }
-        public static List<EPlayer> OnlineEPlayerWhoInMainMap { get { return (from p in EPlayers where p != null && !p.GameInfo.IsInAnotherWorld select p).ToList(); } }
+        public static List<EPlayer> OnlineEPlayerWhoInMainMap { get { return (from p in EPlayers where p != null && !p.IsInAnotherWorld select p).ToList(); } }
 
         public static EPlayer[] EPlayers = new EPlayer[255];
 
@@ -83,8 +83,9 @@ namespace EternalLandPlugin
                 GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
                 GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
-                //GetDataHandlers.TileEdit += GameNet.OnTileEdit;
-                GetDataHandlers.PlaceObject += GameNet.OnPlaceObject;
+                GetDataHandlers.SendTileSquare += delegate(object o, GetDataHandlers.SendTileSquareEventArgs args) { args.Handled = true; };
+                GetDataHandlers.ChestOpen += GameNet.OnChestOpen;
+                GetDataHandlers.LiquidSet += GameNet.OnLiquidSet;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
                 {
@@ -96,6 +97,15 @@ namespace EternalLandPlugin
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
                 {
                     "/map"
+                })
+                {
+                    HelpText = "小遊戲服管理員命令 <地图>."
+                });
+                Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.Territory, new string[]
+                {
+                    "territory",
+                    "属地",
+                    "sd"
                 })
                 {
                     HelpText = "小遊戲服管理員命令 <地图>."
@@ -134,6 +144,7 @@ namespace EternalLandPlugin
             await Task.Run(() =>
             {
                 OnlineEPlayer.ForEach(e => e.Update());
+                MapManager.UpdateMap();
             });
         }
 

@@ -112,7 +112,7 @@ namespace EternalLandPlugin
 
     public static class Expansion
     {
-        public static readonly string ServerPrefix = "[c/f5b6b1:✿][c/ec7062:-永恒][c/ca6f1d:▪][c/f4cf40:cORE-][c/f9e79f:✿] ";
+        public static readonly string ServerPrefix = "[c/f5b6b1:✿][c/ec7062: 永恒][c/ca6f1d:▪][c/f4cf40:cORE ][c/f9e79f:✿] ";
 
         public static EItem ToEItem(this Item item)
         {
@@ -126,7 +126,7 @@ namespace EternalLandPlugin
 
         public static EPlayer EPlayer(this TSPlayer tsp)
         {
-            return tsp.Account != null ? UserManager.GetEPlayerFromID(tsp.Account.ID) : null;
+            try { return tsp.Account != null ? UserManager.GetEPlayerFromID(tsp.Account.ID) : null; } catch { return null; }
         }
 
         public static TSPlayer TSPlayer(this EPlayer eplr)
@@ -167,13 +167,21 @@ namespace EternalLandPlugin
             color = color == default ? new Color(212, 239, 245) : color;
             tsp.SendMessage(ServerPrefix + text, color);
         }
-
-
         public static void SendMultipleError(this TSPlayer tsp, IEnumerable<object> matches)
         {
             tsp.SendErrorEX("检索出多个满足条件的项目: ");
             Utils.BuildLinesFromTerms(matches.ToArray<object>(), null, ", ", 80).ForEach(new Action<string>(tsp.SendInfoEX));
             tsp.SendErrorEX("使用 \"部分1 部分2\" 来输入包含空格的关键词.");
+        }
+
+        public static EItem[] ToEItems(this Item[] item)
+        {
+            var array = new EItem[40];
+            for (int i = 0; i < 40; i++)
+            {
+                array[i] = item[i];
+            }
+            return array;
         }
     }
 }

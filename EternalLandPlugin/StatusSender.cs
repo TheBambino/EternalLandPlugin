@@ -28,7 +28,7 @@ namespace EternalLandPlugin
                         var eplr = tsp.EPlayer();
                         string text = string.Empty;
                         var col = Rambo();
-                        string rambotitle = $"[c/{System.Drawing.ColorTranslator.ToHtml(System.Drawing.Color.FromArgb(col.R, col.G, col.B)).Replace("#", "")}:  ●永恒之地服务器● ]";
+                        string rambotitle = $"[c/{System.Drawing.ColorTranslator.ToHtml(System.Drawing.Color.FromArgb(col.R, col.G, col.B)).Replace("#", "")}:● EternalLand Server ●]";
                         if (eplr != null)
                         {
                             string hungry = string.Empty;
@@ -50,7 +50,7 @@ namespace EternalLandPlugin
                                 }
                             }
                             text = $"{rambotitle}                                                                \r\n" +
-                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:---------------]\r\n" +
+                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n" +
                              $"[c/9FD1C4:资产:] {eplr.Money}\n" +
                              $"[c/9FD1C4:延迟:] {(eplr.ping < 60 ? "[i:3738]" : "[i:3736]")} {eplr.ping} ms\n" +
                              $"[c/9FD1C4:饥饿:] [{hungry}]\n" +
@@ -59,7 +59,7 @@ namespace EternalLandPlugin
                         else
                         {
                             text = $"{rambotitle}                                                                \r\n" +
-                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:---------------]\r\n"
+                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n"
                             + $"[c/9FD1C4:    欢迎加入服务器]" +
                             $"{RepeatLineBreaks(59)}";
                         }
@@ -67,7 +67,7 @@ namespace EternalLandPlugin
                     });
                 }
                 catch (Exception ex){ Log.Error(ex.Message ); }
-                Thread.Sleep(50);
+                Thread.Sleep(100);
             }
         }
 

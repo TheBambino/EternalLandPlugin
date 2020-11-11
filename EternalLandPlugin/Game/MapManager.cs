@@ -11,6 +11,7 @@ using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
+using System.Runtime.Serialization.Formatters.Binary;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -18,6 +19,8 @@ using Terraria;
 using Terraria.DataStructures;
 using Terraria.Enums;
 using Terraria.GameContent;
+using Terraria.GameContent.Achievements;
+using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Events;
 using Terraria.GameContent.Tile_Entities;
 using Terraria.GameContent.UI;
@@ -32,12 +35,18 @@ using TShockAPI;
 using static Terraria.Framing;
 using Color = Microsoft.Xna.Framework.Color;
 using Point = Microsoft.Xna.Framework.Point;
+using Point16 = EternalLandPlugin.Game.MapManager.MapData.Point16;
+using Chest = EternalLandPlugin.Game.MapTools.Chest;
+using Liquid = EternalLandPlugin.Game.MapTools.Liquid;
+using LiquidBuffer = EternalLandPlugin.Game.MapTools.LiquidBuffer;
+using MessagePack;
 
 namespace EternalLandPlugin.Game
 {
     public class MapManager
     {
         public static UnifiedRandom Rand = new UnifiedRandom();
+        [MessagePackObject(keyAsPropertyName: true)]
         [Serializable]
         public class MapData : IDisposable, ICloneable
         {
@@ -45,40 +54,47 @@ namespace EternalLandPlugin.Game
             {
                 return this.Clone();
             }
-            public MapData Clone()
+            public async Task<MapData> Clone()
             {
-                return (MapData)this.MemberwiseClone();
+                return await Task.Run(() =>
+                {
+                    return MessagePackSerializer.Deserialize<MapData>(MessagePackSerializer.Serialize(this));
+                });
             }
             public void Dispose()
             {
-                Chest.Clear();
+                Chest = null;
                 Tile.Dispose();
+                Tile = null;
                 Sign.Clear();
                 Player.Clear();
             }
-            public MapData(Point topleft, Point bottomright, string name = "UnKnown", bool keepalive = false)
+            public MapData(Point topleft, Point bottomright, string name = "UnKnown", Guid uuid = default, bool keepalive = false)
             {
+                UUID = uuid;
                 Name = name;
                 KeepAlive = keepalive;
                 ReadTile(topleft.X, topleft.Y, bottomright.X - topleft.X, bottomright.Y - topleft.Y);
             }
 
-            public MapData(int StartX, int StartY, int width, int height, string name = "UnKnown", bool keepalive = false)
+            public MapData(int StartX, int StartY, int width, int height, string name = "UnKnown", Guid uuid = default, bool keepalive = false)
             {
+                UUID = uuid;
                 Name = name;
                 KeepAlive = keepalive;
                 ReadTile(StartX, StartY, width, height);
             }
 
-            public MapData(FakeTileProvider data, int startx, int starty)
+            public MapData(FakeTileProvider data, int startx, int starty, Guid uuid = default)
             {
+                UUID = uuid;
                 Width = data.Width;
                 Height = data.Height;
                 StartX = startx;
                 StartY = starty;
                 Tile = data;
             }
-
+            [SerializationConstructor]
             public MapData()
             {
                 Width = Main.maxTilesX;
@@ -89,52 +105,64 @@ namespace EternalLandPlugin.Game
                 Initialize();
             }
 
-            async void ReadTile(int StartX, int StartY, int width, int height)
+            void ReadTile(int StartX, int StartY, int width, int height)
             {
-                await Task.Run(() =>
+                /*await Task.Run(() =>
+                {*/
+                Initialize();
+                Height = height;
+                Width = width;
+                Tile = new FakeTileProvider(width, height);
+                int y = 0;
+                int chest = 0;
+                int sign = 0;
+                for (int tiley = StartY; y < Height; tiley++)
                 {
-                    Initialize();
-                    Height = height;
-                    Width = width;
-                    Tile = new FakeTileProvider(width, height);
-                    int y = 0;
-                    int chest = 0;
-                    int sign = 0;
-                    for (int tiley = StartY; y < Height; tiley++)
+                    int x = 0;
+                    for (int tilex = StartX; x < Width; tilex++)
                     {
-                        int x = 0;
-                        for (int tilex = StartX; x < Width; tilex++)
+                        try
                         {
-                            try
+                            ITile temptile = Main.tile[tilex, tiley];
+                            Tile[x, y].CopyFrom(temptile);
+                            if ((TileID.Sets.BasicChest[(int)temptile.type] && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0) || (temptile.type == 88 && temptile.frameX % 54 == 0 && temptile.frameY % 36 == 0))
                             {
-                                ITile temptile = this[tilex, tiley] ?? new Tile();
-                                Tile[x, y].CopyFrom(temptile);
-                                if ((TileID.Sets.BasicChest[(int)temptile.type] && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0) || (temptile.type == 88 && temptile.frameX % 54 == 0 && temptile.frameY % 36 == 0))
+                                int chestid = (short)Terraria.Chest.FindChest(tilex, tiley);
+                                if (chestid != -1)
                                 {
-                                    int chestid = (short)Terraria.Chest.FindChest(tilex, tiley);
                                     var temp = Main.chest[chestid];
                                     temp.x = x;
                                     temp.y = y;
-                                    if (chestid != -1) Chest.Add((short)chest, temp);
+                                    if (chestid != -1) Chest[chest] = new Chest() { name = temp.name, bankChest = temp.bankChest, item = temp.item.ToEItems(), frame = temp.frame, frameCounter = temp.frameCounter, x = temp.x, y = temp.y };
                                     chest++;
                                 }
-                                if ((temptile.type == 85 | temptile.type == 55 || temptile.type == 425) && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0)
-                                {
-                                    int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, true);
-                                    var temp = Main.sign[signid];
-                                    temp.x = x;
-                                    temp.y = y;
-                                    if (signid != -1) Sign.Add((short)sign, temp);
-                                    sign++;
-                                }
                             }
-                            catch { }
-
-                            x++;
+                            if ((temptile.type == 85 | temptile.type == 55 || temptile.type == 425) && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0)
+                            {
+                                int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, true);
+                                var temp = Main.sign[signid];
+                                temp.x = x;
+                                temp.y = y;
+                                if (signid != -1) Sign.Add((short)sign, temp);
+                                sign++;
+                            }
+                            if (temptile.liquid != 0)
+                            {
+                                Console.WriteLine("氵");
+                                Liquid[numLiquid].x = x;
+                                Liquid[numLiquid].y = y;
+                                Liquid[numLiquid].kill = 0;
+                                Liquid[numLiquid].delay = 0;
+                                numLiquid++;
+                            }
                         }
-                        y++;
+                        catch (Exception ex) { Console.WriteLine($"{ex}\n世界坐标: {tilex} - {tiley} , 相对坐标: {x} - {y}"); }
+
+                        x++;
                     }
-                });
+                    y++;
+                }
+                // });
             }
             internal void ApplyTiles(FakeTileProvider Tiles, int AbsoluteX, int AbsoluteY)
             {
@@ -174,13 +202,13 @@ namespace EternalLandPlugin.Game
                     }
                 });
             }
-            public void SendDataToPlayer(int msgType,int remote, int ignore, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
+            public void SendDataToPlayer(int msgType, int remote, int ignore, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
             {
                 Player.ForEach(p =>
                 {
                     if (UserManager.GetTSPlayerFromID(p, out var tsp))
                     {
-                        if (!tsp.RealPlayer || tsp.ConnectionAlive)
+                        if (tsp.RealPlayer && tsp.ConnectionAlive)
                         {
                             NetMessage.SendData(msgType, tsp.Index, 255, NetworkText.FromLiteral(text), number, number2, number3, number4, number5);
                         }
@@ -204,7 +232,7 @@ namespace EternalLandPlugin.Game
                         {
                             if (tilex < StartX + Width && tilex > StartX && tiley < StartY + Height && tiley > StartY)
                             {
-                                tiles[tilex - realx, tiley - realy].CopyFrom(Tile[tilex - StartX, tiley - StartY]);
+                                tiles[tilex - realx, tiley - realy].CopyFrom(Tile[tilex - StartX, tiley - StartY] ?? new Tile());
                             }
                             else
                             {
@@ -274,7 +302,7 @@ namespace EternalLandPlugin.Game
             }
             public bool IsInMap(int x, int y)
             {
-                if (x >= StartX && x < StartX + Width && y >= StartY && y < StartY + Height)
+                if (x >= StartX && x <= StartX + Width && y >= StartY && y <= StartY + Height)
                 {
                     return true;
                 }
@@ -294,11 +322,17 @@ namespace EternalLandPlugin.Game
                 catch { }
                 return list;
             }
-            public short FindChest(int rx, int ry)
+            public int FindChest(int X, int Y)
             {
-                var chest = -1;
-                Chest.ForEach(c => { if (c.Value.x == rx && c.Value.y == ry) { chest = c.Key; return; } });
-                return (short)chest;
+                GetRelative(X, Y, out int x, out int y);
+                for (int i = 0; i < 8000; i++)
+                {
+                    if (Chest[i] != null && Chest[i].x == x && Chest[i].y == y)
+                    {
+                        return i;
+                    }
+                }
+                return -1;
             }
             public int FindSign(int rx, int ry)
             {
@@ -316,8 +350,14 @@ namespace EternalLandPlugin.Game
             public int Height;
             public int SpawnX = -1;
             public int SpawnY = -1;
+            public int MaxTilesX => StartX + Width;
+            public int MaxTilesY => StartY + Height;
+            public Guid UUID = Guid.Empty;
+            public Liquid[] Liquid = new Liquid[25000];
+            public LiquidBuffer[] LiquidBuffer = new LiquidBuffer[50000];
             public List<int> Player = new List<int>();
-            public Dictionary<short, Chest> Chest = new Dictionary<short, Chest>();
+            public Chest[] Chest = new Chest[8000];
+            [IgnoreMember]
             public Dictionary<short, Sign> Sign = new Dictionary<short, Sign>();
             //public Projectile[] Proj = new Projectile[1000];
             //public NPC[] Npc = new NPC[1000];
@@ -375,7 +415,6 @@ namespace EternalLandPlugin.Game
                 {
                     return false;
                 }
-                int num = 10;
                 KillWall_DropItems(x, y, tile);
                 tile.wall = targetWall;
                 tile.wallColor(0);
@@ -432,7 +471,7 @@ namespace EternalLandPlugin.Game
                     if (IsChestRigged(topLeftX, topLeftY) && Main.netMode != 1)
                     {
                         HitSwitch(topLeftX, topLeftY);
-                        NetMessage.SendData(59, -1, -1, null, topLeftX, topLeftY);
+                        SendDataToPlayer(59, -1, -1, null, topLeftX, topLeftY);
                     }
                     ReplaceTile_DoActualReplacement_Area(targetType, targetStyle, topLeftX, topLeftY, 2, 2);
                 }
@@ -468,10 +507,17 @@ namespace EternalLandPlugin.Game
                 }
                 SquareTileFrame(topLeftX, topLeftY);
             }
-
+            public bool InWorld(int x, int y, int fluff = 0)
+            {
+                if (x < fluff || x >= StartX + Width - fluff || y < fluff || y >= StartY + Height - fluff)
+                {
+                    return false;
+                }
+                return true;
+            }
             public void ReplaceTile_EliminateNaturalExtras(int x, int y)
             {
-                if (WorldGen.InWorld(x, y, 2))
+                if (InWorld(x, y, 2))
                 {
                     if (this[x, y - 1] != null && this[x, y - 1].active() && (TileID.Sets.ReplaceTileBreakUp[this[x, y - 1].type] || (this[x, y - 1].type == 165 && (this[x, y - 1].frameY == 36 || this[x, y - 1].frameY == 54 || this[x, y - 1].frameY == 90))))
                     {
@@ -551,7 +597,7 @@ namespace EternalLandPlugin.Game
             }
             public void KillWall(int i, int j, bool fail = false)
             {
-                if (i < 0 || j < 0 || i >= Main.maxTilesX || j >= Main.maxTilesY)
+                if (i < 0 || j < 0 || i >= MaxTilesX || j >= MaxTilesY)
                 {
                     return;
                 }
@@ -566,11 +612,6 @@ namespace EternalLandPlugin.Game
                     return;
                 }
                 fail = WorldGen.KillWall_CheckFailure(fail, tile);
-                int num = 10;
-                if (fail)
-                {
-                    num = 3;
-                }
                 if (fail)
                 {
                     SquareWallFrame(i, j);
@@ -741,7 +782,7 @@ namespace EternalLandPlugin.Game
             public bool CanKillTile(int i, int j, out bool blockDamaged)
             {
                 blockDamaged = false;
-                if (i < 0 || j < 0 || i >= Main.maxTilesX || j >= Main.maxTilesY)
+                if (i < 0 || j < 0 || i >= MaxTilesX || j >= MaxTilesY)
                 {
                     return false;
                 }
@@ -894,7 +935,7 @@ namespace EternalLandPlugin.Game
                     this[i, j].actuator(actuator: false);
                     if (Main.netMode != 1)
                     {
-                        Item.NewItem(i * 16, j * 16, 16, 16, 849);
+                        NewItem(i * 16, j * 16, 16, 16, 849);
                     }
                     return true;
                 }
@@ -902,7 +943,7 @@ namespace EternalLandPlugin.Game
             }
             public void PlaceWall(int i, int j, int type, bool mute = false)
             {
-                if (i <= 1 || j <= 1 || i >= Main.maxTilesX - 2 || j >= Main.maxTilesY - 2)
+                if (i <= 1 || j <= 1 || i >= MaxTilesX - 2 || j >= MaxTilesY - 2)
                 {
                     return;
                 }
@@ -1011,7 +1052,7 @@ namespace EternalLandPlugin.Game
             }
             public bool KillTile_ShouldDropSeeds(int x, int y)
             {
-                if (Utils.RANDOM.Next(2) == 0)
+                if (Rand.Next(2) == 0)
                 {
                     if (!GetPlayerForTile(x, y).HasItem(281))
                     {
@@ -2176,7 +2217,7 @@ namespace EternalLandPlugin.Game
                     case 52:
                     case 62:
                     case 382:
-                        if (Rand.Next(2) == 0 && WorldGen.GetPlayerForTile(x, y).cordage)
+                        if (Rand.Next(2) == 0 && GetPlayerForTile(x, y).cordage)
                         {
                             dropItem = 2996;
                         }
@@ -2968,7 +3009,7 @@ namespace EternalLandPlugin.Game
                                 num2 = 2357;
                             }
                             bool flag = WorldGen.IsHarvestableHerbWithSeed(tileCache.type, num);
-                            if (WorldGen.GetPlayerForTile(x, y).HeldItem.type == 213)
+                            if (GetPlayerForTile(x, y).HeldItem.type == 213)
                             {
                                 dropItemStack = Rand.Next(1, 3);
                                 secondaryItem = num2;
@@ -3122,7 +3163,7 @@ namespace EternalLandPlugin.Game
                     int number = NewItem(ax * 16, ay * 16, 16, 16, 1874 + num3 - 1);
                     if (Main.netMode == 1)
                     {
-                        NetMessage.SendData(21, -1, -1, null, number, 1f);
+                        SendDataToPlayer(21, -1, -1, null, number, 1f);
                     }
                 }
                 else if (obj == 1 && num4 > 0)
@@ -3130,7 +3171,7 @@ namespace EternalLandPlugin.Game
                     int number2 = NewItem(ax * 16, ay * 16, 16, 16, 1878 + num4 - 1);
                     if (Main.netMode == 1)
                     {
-                        NetMessage.SendData(21, -1, -1, null, number2, 1f);
+                        SendDataToPlayer(21, -1, -1, null, number2, 1f);
                     }
                 }
                 else if (obj == 2 && num5 > 0)
@@ -3138,7 +3179,7 @@ namespace EternalLandPlugin.Game
                     int number3 = NewItem(ax * 16, ay * 16, 16, 16, 1884 + num5 - 1);
                     if (Main.netMode == 1)
                     {
-                        NetMessage.SendData(21, -1, -1, null, number3, 1f);
+                        SendDataToPlayer(21, -1, -1, null, number3, 1f);
                     }
                 }
                 else if (obj == 3 && num6 > 0)
@@ -3146,7 +3187,7 @@ namespace EternalLandPlugin.Game
                     int number4 = NewItem(ax * 16, ay * 16, 16, 16, 1895 + num6 - 1);
                     if (Main.netMode == 1)
                     {
-                        NetMessage.SendData(21, -1, -1, null, number4, 1f);
+                        SendDataToPlayer(21, -1, -1, null, number4, 1f);
                     }
                 }
             }
@@ -3247,7 +3288,7 @@ namespace EternalLandPlugin.Game
                 ITile tileSafely = GetTileSafely(x, y);
                 if (tileSafely.type == 323)
                 {
-                    while (y < Main.maxTilesY - 50 && (!tileSafely.active() || tileSafely.type == 323))
+                    while (y < MaxTilesY - 50 && (!tileSafely.active() || tileSafely.type == 323))
                     {
                         y++;
                         tileSafely = GetTileSafely(x, y);
@@ -3281,13 +3322,13 @@ namespace EternalLandPlugin.Game
                     x--;
                 }
                 tileSafely = GetTileSafely(x, y);
-                while (y < Main.maxTilesY - 50 && (!tileSafely.active() || TileID.Sets.IsATreeTrunk[tileSafely.type] || tileSafely.type == 72))
+                while (y < MaxTilesY - 50 && (!tileSafely.active() || TileID.Sets.IsATreeTrunk[tileSafely.type] || tileSafely.type == 72))
                 {
                     y++;
                     tileSafely = GetTileSafely(x, y);
                 }
             }
-            void SquareTileFrame(int i, int j, bool resetFrame = true)
+            public void SquareTileFrame(int i, int j, bool resetFrame = true)
             {
                 TileFrame(i - 1, j - 1);
                 TileFrame(i - 1, j);
@@ -3309,7 +3350,7 @@ namespace EternalLandPlugin.Game
                 int num = j;
                 bool flag = false;
                 int num2 = num;
-                while ((!this[x, num2].active() || !Main.tileSolid[this[x, num2].type] || Main.tileSolidTop[this[x, num2].type]) && num2 < Main.maxTilesY - 50)
+                while ((!this[x, num2].active() || !Main.tileSolid[this[x, num2].type] || Main.tileSolidTop[this[x, num2].type]) && num2 < MaxTilesY - 50)
                 {
                     if (this[x, num2].active() && this[x, num2].type != 519)
                     {
@@ -3447,7 +3488,7 @@ namespace EternalLandPlugin.Game
                             KillTile(x, i);
                             if (Main.netMode == 2)
                             {
-                                NetMessage.SendData(17, -1, -1, null, 0, x, i);
+                                SendDataToPlayer(17, -1, -1, null, 0, x, i);
                             }
                             SquareTileFrame(x, i);
                         }
@@ -3484,7 +3525,7 @@ namespace EternalLandPlugin.Game
                     KillTile(x, y);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(17, -1, -1, null, 0, x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
                     }
                     SquareTileFrame(x, y);
                     return;
@@ -3657,7 +3698,7 @@ namespace EternalLandPlugin.Game
                     KillTile(x, y);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(17, -1, -1, null, 0, x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
                     }
                     SquareTileFrame(x, y);
                     return;
@@ -3822,8 +3863,8 @@ namespace EternalLandPlugin.Game
             }
             public void PlantCheck(int x, int y)
             {
-                x = Terraria.Utils.Clamp(x, 1, Main.maxTilesX - 2);
-                y = Terraria.Utils.Clamp(y, 1, Main.maxTilesY - 2);
+                x = Terraria.Utils.Clamp(x, 1, MaxTilesX - 2);
+                y = Terraria.Utils.Clamp(y, 1, MaxTilesY - 2);
                 for (int i = x - 1; i <= x + 1; i++)
                 {
                     for (int j = y - 1; j <= y + 1; j++)
@@ -3839,10 +3880,10 @@ namespace EternalLandPlugin.Game
                 _ = x - 1;
                 _ = 0;
                 _ = x + 1;
-                _ = Main.maxTilesX;
+                _ = MaxTilesX;
                 _ = y - 1;
                 _ = 0;
-                if (y + 1 >= Main.maxTilesY)
+                if (y + 1 >= MaxTilesY)
                 {
                     num = num2;
                 }
@@ -3850,7 +3891,7 @@ namespace EternalLandPlugin.Game
                 {
                     _ = this[x - 1, y].type;
                 }
-                if (x + 1 < Main.maxTilesX && this[x + 1, y] != null && this[x + 1, y].nactive())
+                if (x + 1 < MaxTilesX && this[x + 1, y] != null && this[x + 1, y].nactive())
                 {
                     _ = this[x + 1, y].type;
                 }
@@ -3858,7 +3899,7 @@ namespace EternalLandPlugin.Game
                 {
                     _ = this[x, y - 1].type;
                 }
-                if (y + 1 < Main.maxTilesY && this[x, y + 1] != null && this[x, y + 1].nactive() && !this[x, y + 1].halfBrick() && this[x, y + 1].slope() == 0)
+                if (y + 1 < MaxTilesY && this[x, y + 1] != null && this[x, y + 1].nactive() && !this[x, y + 1].halfBrick() && this[x, y + 1].slope() == 0)
                 {
                     num = this[x, y + 1].type;
                 }
@@ -3866,15 +3907,15 @@ namespace EternalLandPlugin.Game
                 {
                     _ = this[x - 1, y - 1].type;
                 }
-                if (x + 1 < Main.maxTilesX && y - 1 >= 0 && this[x + 1, y - 1] != null && this[x + 1, y - 1].nactive())
+                if (x + 1 < MaxTilesX && y - 1 >= 0 && this[x + 1, y - 1] != null && this[x + 1, y - 1].nactive())
                 {
                     _ = this[x + 1, y - 1].type;
                 }
-                if (x - 1 >= 0 && y + 1 < Main.maxTilesY && this[x - 1, y + 1] != null && this[x - 1, y + 1].nactive())
+                if (x - 1 >= 0 && y + 1 < MaxTilesY && this[x - 1, y + 1] != null && this[x - 1, y + 1].nactive())
                 {
                     _ = this[x - 1, y + 1].type;
                 }
-                if (x + 1 < Main.maxTilesX && y + 1 < Main.maxTilesY && this[x + 1, y + 1] != null && this[x + 1, y + 1].nactive())
+                if (x + 1 < MaxTilesX && y + 1 < MaxTilesY && this[x + 1, y + 1] != null && this[x + 1, y + 1].nactive())
                 {
                     _ = this[x + 1, y + 1].type;
                 }
@@ -4549,10 +4590,10 @@ namespace EternalLandPlugin.Game
             }
             public void Kill(int x, int y)
             {
-                if (TileEntity.ByPosition.TryGetValue(new Point16(x, y), out TileEntity value))
+                if (TileEntity.ByPosition.TryGetValue(new Terraria.DataStructures.Point16(x, y), out TileEntity value))
                 {
                     TileEntity.ByID.Remove(value.ID);
-                    TileEntity.ByPosition.Remove(new Point16(x, y));
+                    TileEntity.ByPosition.Remove(new Terraria.DataStructures.Point16(x, y));
                 }
             }
             public void Framing_CheckTile(int callX, int callY)
@@ -6747,7 +6788,7 @@ namespace EternalLandPlugin.Game
             }
             public bool CanDestroyChest(int X, int Y)
             {
-                short i = FindChest(X, Y);
+                short i = (short)FindChest(X, Y);
                 if (i == -1) return false;
                 Chest chest = Chest[i];
                 for (int j = 0; j < 40; j++)
@@ -7479,7 +7520,7 @@ namespace EternalLandPlugin.Game
                             {
                                 num17 *= 0.75f;
                             }
-                            else if (j > Main.maxTilesY - 250)
+                            else if (j > MaxTilesY - 250)
                             {
                                 num17 *= 1.25f;
                             }
@@ -8856,11 +8897,11 @@ namespace EternalLandPlugin.Game
                         int num16 = NPC.NewNPC(num2 * 16, num3 * 16 + 32, 582);
                         Main.npc[num16].TargetClosest();
                         Main.npc[num16].velocity = new Vector2((float)Main.npc[num16].direction * 1.5f, -5f);
-                        NetMessage.SendData(23, -1, -1, null, num16);
+                        SendDataToPlayer(23, -1, -1, null, num16);
                         int num17 = 20;
                         int num18 = -1;
                         Main.npc[num16].GetImmuneTime(num18, num17);
-                        NetMessage.SendData(131, -1, -1, null, num16, 1f, num18, num17);
+                        SendDataToPlayer(131, -1, -1, null, num16, 1f, num18, num17);
                     }
                 }
                 if (type == 444 && Main.netMode != 1 && !flag6)
@@ -9563,7 +9604,7 @@ namespace EternalLandPlugin.Game
                 int num2 = x + 3;
                 int num3 = y - 2;
                 int num4 = y + 3;
-                if (num < 0 || num2 > Main.maxTilesX || num3 < 0 || num4 > Main.maxTilesY)
+                if (num < 0 || num2 > MaxTilesX || num3 < 0 || num4 > MaxTilesY)
                 {
                     return;
                 }
@@ -12773,7 +12814,6 @@ namespace EternalLandPlugin.Game
                 }
                 destroyObject = false;
             }
-            int altarCount = 0;
             public void SmashAltar(int i, int j)
             {
                 Utils.Broadcast("[Internal Error]事件禁用.");
@@ -12781,7 +12821,7 @@ namespace EternalLandPlugin.Game
 
                 /*int num = altarCount % 3;
                 int num2 = altarCount / 3 + 1;
-                float num3 = Main.maxTilesX / 4200;
+                float num3 = MaxTilesX / 4200;
                 int num4 = 1 - num;
                 num3 = num3 * 310f - (float)(85 * num);
                 num3 *= 0.85f;
@@ -12910,11 +12950,11 @@ namespace EternalLandPlugin.Game
                 }
                 if (flag)
                 {
-                    NetMessage.SendData(7);
+                    SendDataToPlayer(7);
                 }
                 for (int k = 0; (float)k < num3; k++)
                 {
-                    int i2 = genRand.Next(100, Main.maxTilesX - 100);
+                    int i2 = genRand.Next(100, MaxTilesX - 100);
                     double num8 = Main.worldSurface;
                     if (num == 108 || num == 222)
                     {
@@ -12922,17 +12962,17 @@ namespace EternalLandPlugin.Game
                     }
                     if (num == 111 || num == 223)
                     {
-                        num8 = (Main.rockLayer + Main.rockLayer + (double)Main.maxTilesY) / 3.0;
+                        num8 = (Main.rockLayer + Main.rockLayer + (double)MaxTilesY) / 3.0;
                     }
-                    int j2 = genRand.Next((int)num8, Main.maxTilesY - 150);
+                    int j2 = genRand.Next((int)num8, MaxTilesY - 150);
                     OreRunner(i2, j2, genRand.Next(5, 9 + num4), genRand.Next(5, 9 + num4), (ushort)num);
                 }
                 int num9 = genRand.Next(3);
                 int num10 = 0;
                 while (num9 != 2 && num10++ < 1000)
                 {
-                    int num11 = genRand.Next(100, Main.maxTilesX - 100);
-                    int num12 = genRand.Next((int)Main.rockLayer + 50, Main.maxTilesY - 300);
+                    int num11 = genRand.Next(100, MaxTilesX - 100);
+                    int num12 = genRand.Next((int)Main.rockLayer + 50, MaxTilesY - 300);
                     if (!this[num11, num12].active() || this[num11, num12].type != 1)
                     {
                         continue;
@@ -13630,7 +13670,7 @@ namespace EternalLandPlugin.Game
                 bool addToList = false;
                 try
                 {
-                    if (i > 5 && j > 5 && i < Main.maxTilesX - 5 && j < Main.maxTilesY - 5 && this[i, j] != null)
+                    if (i > 5 && j > 5 && i < MaxTilesX - 5 && j < MaxTilesY - 5 && this[i, j] != null)
                     {
                         if (WorldGen.SkipFramingBecauseOfGen && !Main.tileFrameImportant[this[i, j].type])
                         {
@@ -13646,7 +13686,7 @@ namespace EternalLandPlugin.Game
                         }
                         if (tile.liquid > 0 && Main.netMode != 1 && !WorldGen.noLiquidCheck)
                         {
-                            Liquid.AddWater(i, j);
+                            AddWater(i, j);
                         }
                         if (tile.active())
                         {
@@ -14295,7 +14335,7 @@ namespace EternalLandPlugin.Game
                                                                         CheckWeaponsRack(i, j);
                                                                         break;
                                                                     case 471:
-                                                                        TEWeaponsRack.Framing_CheckTile(i, j);
+                                                                        Framing_CheckTile(i, j);
                                                                         break;
                                                                     case 34:
                                                                     case 454:
@@ -14887,32 +14927,32 @@ namespace EternalLandPlugin.Game
                                                     switch (num)
                                                     {
                                                         case 147:
-                                                            WorldGen.TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Ices, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Ices, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         case 161:
                                                         case 163:
                                                         case 164:
                                                         case 200:
-                                                            WorldGen.TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Snow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Snow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         case 162:
-                                                            WorldGen.TileMergeAttempt(num, Main.tileBrick, TileID.Sets.IcesSnow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttempt(num, Main.tileBrick, TileID.Sets.IcesSnow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         default:
                                                             if (Main.tileBrick[num])
                                                             {
                                                                 if (num == 60 || num == 70)
                                                                 {
-                                                                    WorldGen.TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Mud, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttempt(num, Main.tileBrick, TileID.Sets.Mud, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 }
                                                                 else
                                                                 {
-                                                                    WorldGen.TileMergeAttempt(num, Main.tileBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttempt(num, Main.tileBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 }
                                                             }
                                                             else if (Main.tilePile[num])
                                                             {
-                                                                WorldGen.TileMergeAttempt(num, Main.tilePile, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, Main.tilePile, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             }
                                                             break;
                                                     }
@@ -15034,10 +15074,10 @@ namespace EternalLandPlugin.Game
                                                                 return;
                                                         }
                                                     }
-                                                    WorldGen.mergeUp = false;
-                                                    WorldGen.mergeDown = false;
-                                                    WorldGen.mergeLeft = false;
-                                                    WorldGen.mergeRight = false;
+                                                    mergeUp = false;
+                                                    mergeDown = false;
+                                                    mergeLeft = false;
+                                                    mergeRight = false;
                                                     int num27 = 0;
                                                     if (resetFrame)
                                                     {
@@ -15082,12 +15122,12 @@ namespace EternalLandPlugin.Game
                                                         int num31 = j % 2;
                                                         num27 = num30 + num31 * 2;
                                                     }
-                                                    WorldGen.TileMergeAttempt(num, Main.tileBlendAll, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                    TileMergeAttempt(num, Main.tileBlendAll, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     if (Main.tileBlendAll[num])
                                                     {
                                                         Main.tileSolid[10] = false;
                                                         Main.tileSolid[387] = false;
-                                                        WorldGen.TileMergeAttempt(num, Main.tileSolid, Main.tileSolidTop, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, Main.tileSolid, Main.tileSolidTop, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         Main.tileSolid[10] = true;
                                                         Main.tileSolid[387] = true;
                                                     }
@@ -15133,7 +15173,7 @@ namespace EternalLandPlugin.Game
                                                                 if (up > -1 && Main.tileMergeDirt[up])
                                                                 {
                                                                     TileFrame(i, j - 1);
-                                                                    if (WorldGen.mergeDown)
+                                                                    if (mergeDown)
                                                                     {
                                                                         up = num;
                                                                     }
@@ -15141,7 +15181,7 @@ namespace EternalLandPlugin.Game
                                                                 else if (up == 147)
                                                                 {
                                                                     TileFrame(i, j - 1);
-                                                                    if (WorldGen.mergeDown)
+                                                                    if (mergeDown)
                                                                     {
                                                                         up = num;
                                                                     }
@@ -15149,7 +15189,7 @@ namespace EternalLandPlugin.Game
                                                                 if (down > -1 && Main.tileMergeDirt[down])
                                                                 {
                                                                     TileFrame(i, j + 1);
-                                                                    if (WorldGen.mergeUp)
+                                                                    if (mergeUp)
                                                                     {
                                                                         down = num;
                                                                     }
@@ -15157,7 +15197,7 @@ namespace EternalLandPlugin.Game
                                                                 else if (down == 147)
                                                                 {
                                                                     TileFrame(i, j + 1);
-                                                                    if (WorldGen.mergeUp)
+                                                                    if (mergeUp)
                                                                     {
                                                                         down = num;
                                                                     }
@@ -15165,7 +15205,7 @@ namespace EternalLandPlugin.Game
                                                                 if (left > -1 && Main.tileMergeDirt[left])
                                                                 {
                                                                     TileFrame(i - 1, j);
-                                                                    if (WorldGen.mergeRight)
+                                                                    if (mergeRight)
                                                                     {
                                                                         left = num;
                                                                     }
@@ -15173,7 +15213,7 @@ namespace EternalLandPlugin.Game
                                                                 else if (left == 147)
                                                                 {
                                                                     TileFrame(i - 1, j);
-                                                                    if (WorldGen.mergeRight)
+                                                                    if (mergeRight)
                                                                     {
                                                                         left = num;
                                                                     }
@@ -15181,7 +15221,7 @@ namespace EternalLandPlugin.Game
                                                                 if (right > -1 && Main.tileMergeDirt[right])
                                                                 {
                                                                     TileFrame(i + 1, j);
-                                                                    if (WorldGen.mergeLeft)
+                                                                    if (mergeLeft)
                                                                     {
                                                                         right = num;
                                                                     }
@@ -15189,7 +15229,7 @@ namespace EternalLandPlugin.Game
                                                                 else if (right == 147)
                                                                 {
                                                                     TileFrame(i + 1, j);
-                                                                    if (WorldGen.mergeLeft)
+                                                                    if (mergeLeft)
                                                                     {
                                                                         right = num;
                                                                     }
@@ -15243,8 +15283,8 @@ namespace EternalLandPlugin.Game
                                                                 {
                                                                     downRight = num;
                                                                 }
-                                                                WorldGen.TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(num, 191, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, 191, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 if (up > -1 && TileID.Sets.ForcedDirtMerging[up])
                                                                 {
                                                                     up = num;
@@ -15301,32 +15341,32 @@ namespace EternalLandPlugin.Game
                                                             }
                                                             break;
                                                         case 53:
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 397, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 397, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         case 234:
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 399, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 401, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 399, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 401, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         case 112:
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 398, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 400, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 398, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 400, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                         case 116:
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 402, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 403, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 402, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 403, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             break;
                                                     }
                                                     if (Main.tileMergeDirt[num])
                                                     {
-                                                        WorldGen.TileMergeAttempt(-2, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(-2, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         if (num == 1)
                                                         {
                                                             if ((double)j > Main.rockLayer)
                                                             {
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                             }
-                                                            WorldGen.TileMergeAttemptFrametest(i, j, num, 57, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptFrametest(i, j, num, 57, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         }
                                                     }
                                                     else
@@ -15336,62 +15376,62 @@ namespace EternalLandPlugin.Game
                                                             case 58:
                                                             case 75:
                                                             case 76:
-                                                                WorldGen.TileMergeAttempt(-2, 57, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 57, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 57:
-                                                                WorldGen.TileMergeAttempt(-2, 1, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, TileID.Sets.HellSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 1, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, TileID.Sets.HellSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 59:
                                                                 if ((double)j > Main.rockLayer)
                                                                 {
-                                                                    WorldGen.TileMergeAttempt(-2, 1, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttempt(-2, 1, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 }
-                                                                WorldGen.TileMergeAttempt(num, TileID.Sets.GrassSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, TileID.Sets.JungleSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, TileID.Sets.GrassSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, TileID.Sets.JungleSpecial, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 if ((double)j < Main.rockLayer)
                                                                 {
-                                                                    WorldGen.TileMergeAttemptFrametest(i, j, num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttemptFrametest(i, j, num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 }
                                                                 else
                                                                 {
-                                                                    WorldGen.TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right);
+                                                                    TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right);
                                                                 }
                                                                 break;
                                                             case 211:
-                                                                WorldGen.TileMergeAttempt(59, 60, ref up, ref down, ref left, ref right);
-                                                                WorldGen.TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(59, 60, ref up, ref down, ref left, ref right);
+                                                                TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 225:
                                                             case 226:
-                                                                WorldGen.TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 60:
-                                                                WorldGen.TileMergeAttempt(59, 211, ref up, ref down, ref left, ref right);
+                                                                TileMergeAttempt(59, 211, ref up, ref down, ref left, ref right);
                                                                 break;
                                                             case 189:
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, TileID.Sets.MergesWithClouds, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, TileID.Sets.MergesWithClouds, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 196:
-                                                                WorldGen.TileMergeAttempt(-2, 189, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(num, 460, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 189, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, 460, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 460:
-                                                                WorldGen.TileMergeAttempt(-2, 189, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(num, 196, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 189, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, 196, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 147:
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, TileID.Sets.IcesSlush, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, TileID.Sets.IcesSlush, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 161:
                                                             case 163:
                                                             case 164:
                                                             case 200:
                                                             case 224:
-                                                                WorldGen.TileMergeAttempt(-2, 147, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 147, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 162:
-                                                                WorldGen.TileMergeAttempt(-2, TileID.Sets.IcesSnow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, TileID.Sets.IcesSnow, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 32:
                                                                 if (down == 23)
@@ -15412,102 +15452,102 @@ namespace EternalLandPlugin.Game
                                                                 }
                                                                 break;
                                                             case 51:
-                                                                WorldGen.TileMergeAttempt(num, TileID.Sets.AllTiles, Main.tileNoAttach, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, TileID.Sets.AllTiles, Main.tileNoAttach, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 192:
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 191, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 191, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 191:
-                                                                WorldGen.TileMergeAttempt(-2, 192, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 192, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 384:
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 383, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 383, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 383:
-                                                                WorldGen.TileMergeAttempt(-2, 384, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 384, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 407:
-                                                                WorldGen.TileMergeAttempt(-2, 404, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 404, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 404:
-                                                                WorldGen.TileMergeAttempt(-2, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 407, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 407, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 397:
-                                                                WorldGen.TileMergeAttempt(-2, 53, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 53, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 396, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 396:
-                                                                WorldGen.TileMergeAttempt(-2, 397, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(-2, 53, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 404, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 397, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 53, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 404, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 398:
-                                                                WorldGen.TileMergeAttempt(-2, 112, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 400, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 112, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 400, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 400:
-                                                                WorldGen.TileMergeAttempt(-2, 398, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(-2, 112, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 398, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 112, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 399:
-                                                                WorldGen.TileMergeAttempt(-2, 234, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 401, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 234, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 401, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 401:
-                                                                WorldGen.TileMergeAttempt(-2, 399, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(-2, 234, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 399, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 234, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 402:
-                                                                WorldGen.TileMergeAttempt(-2, 116, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttemptFrametest(i, j, num, 403, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 116, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttemptFrametest(i, j, num, 403, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                             case 403:
-                                                                WorldGen.TileMergeAttempt(-2, 402, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                                WorldGen.TileMergeAttempt(-2, 116, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 402, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                TileMergeAttempt(-2, 116, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                 break;
                                                         }
                                                     }
                                                     if (num == 0)
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, Main.tileMoss, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
-                                                        WorldGen.TileMergeAttempt(num, TileID.Sets.tileMossBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, Main.tileMoss, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, TileID.Sets.tileMossBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     else if (Main.tileMoss[num] || TileID.Sets.tileMossBrick[num])
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, 0, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     else if (Main.tileStone[num] || num == 1)
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, Main.tileMoss, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, Main.tileMoss, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     else if (num == 38)
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, TileID.Sets.tileMossBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, TileID.Sets.tileMossBrick, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     if (TileID.Sets.Conversion.Grass[num])
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, TileID.Sets.Ore, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, TileID.Sets.Ore, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     else if (TileID.Sets.Ore[num])
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, TileID.Sets.Conversion.Grass, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, TileID.Sets.Conversion.Grass, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     if (num == 59)
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, TileID.Sets.OreMergesWithMud, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, TileID.Sets.OreMergesWithMud, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     else if (TileID.Sets.OreMergesWithMud[num])
                                                     {
-                                                        WorldGen.TileMergeAttempt(num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(num, 59, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
                                                     bool flag = false;
                                                     if (num == 2 || num == 23 || num == 60 || num == 477 || num == 492 || num == 70 || num == 109 || num == 199 || Main.tileMoss[num] || TileID.Sets.NeedsGrassFraming[num] || TileID.Sets.tileMossBrick[num])
                                                     {
                                                         flag = true;
-                                                        WorldGen.TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         int num32 = TileID.Sets.NeedsGrassFramingDirt[num];
                                                         if (num == 60 || num == 70)
                                                         {
@@ -15527,10 +15567,10 @@ namespace EternalLandPlugin.Game
                                                             {
                                                                 case 2:
                                                                 case 477:
-                                                                    WorldGen.TileMergeAttempt(num32, 23, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttempt(num32, 23, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                     break;
                                                                 case 23:
-                                                                    WorldGen.TileMergeAttempt(num32, 2, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                                    TileMergeAttempt(num32, 2, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                                     break;
                                                             }
                                                         }
@@ -16698,15 +16738,15 @@ namespace EternalLandPlugin.Game
                                                                 }
                                                             }
                                                         }
-                                                        WorldGen.TileMergeAttempt(-2, num32, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                        TileMergeAttempt(-2, num32, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     }
-                                                    WorldGen.TileMergeAttempt(num, Main.tileMerge[num], ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                    TileMergeAttempt(num, Main.tileMerge[num], ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                     if (rectangle.X == -1 && rectangle.Y == -1 && (Main.tileMergeDirt[num] || (num > -1 && TileID.Sets.ChecksForMerge[num])))
                                                     {
                                                         if (!flag)
                                                         {
                                                             flag = true;
-                                                            WorldGen.TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         }
                                                         if (up > -1 && up != num)
                                                         {
@@ -16743,7 +16783,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 108;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
+                                                                mergeUp = true;
                                                             }
                                                             else if (up == num && down == -2 && left == num && right == num)
                                                             {
@@ -16762,7 +16802,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 90;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeDown = true;
+                                                                mergeDown = true;
                                                             }
                                                             else if (up == num && down == num && left == -2 && right == num)
                                                             {
@@ -16781,7 +16821,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 162;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeLeft = true;
+                                                                mergeLeft = true;
                                                             }
                                                             else if (up == num && down == num && left == num && right == -2)
                                                             {
@@ -16800,7 +16840,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 162;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeRight = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == -2 && down == num && left == -2 && right == num)
                                                             {
@@ -16819,8 +16859,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 162;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeLeft = true;
+                                                                mergeUp = true;
+                                                                mergeLeft = true;
                                                             }
                                                             else if (up == -2 && down == num && left == num && right == -2)
                                                             {
@@ -16839,8 +16879,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 162;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeUp = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == num && down == -2 && left == -2 && right == num)
                                                             {
@@ -16859,8 +16899,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeLeft = true;
+                                                                mergeDown = true;
+                                                                mergeLeft = true;
                                                             }
                                                             else if (up == num && down == -2 && left == num && right == -2)
                                                             {
@@ -16879,8 +16919,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeDown = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == num && down == num && left == -2 && right == -2)
                                                             {
@@ -16899,8 +16939,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 162;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeLeft = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeLeft = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == -2 && down == -2 && left == num && right == num)
                                                             {
@@ -16919,8 +16959,8 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeDown = true;
+                                                                mergeUp = true;
+                                                                mergeDown = true;
                                                             }
                                                             else if (up == -2 && down == num && left == -2 && right == -2)
                                                             {
@@ -16939,9 +16979,9 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 126;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeLeft = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeUp = true;
+                                                                mergeLeft = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == num && down == -2 && left == -2 && right == -2)
                                                             {
@@ -16960,9 +17000,9 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeLeft = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeDown = true;
+                                                                mergeLeft = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == -2 && down == -2 && left == num && right == -2)
                                                             {
@@ -16981,9 +17021,9 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeUp = true;
+                                                                mergeDown = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == -2 && down == -2 && left == -2 && right == num)
                                                             {
@@ -17002,9 +17042,9 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 126;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeLeft = true;
+                                                                mergeUp = true;
+                                                                mergeDown = true;
+                                                                mergeLeft = true;
                                                             }
                                                             else if (up == -2 && down == -2 && left == -2 && right == -2)
                                                             {
@@ -17023,10 +17063,10 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 198;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
-                                                                WorldGen.mergeDown = true;
-                                                                WorldGen.mergeLeft = true;
-                                                                WorldGen.mergeRight = true;
+                                                                mergeUp = true;
+                                                                mergeDown = true;
+                                                                mergeLeft = true;
+                                                                mergeRight = true;
                                                             }
                                                             else if (up == num && down == num && left == num && right == num)
                                                             {
@@ -17125,7 +17165,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 0;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeDown = true;
+                                                                    mergeDown = true;
                                                                 }
                                                                 else if (up == -2 && down == -1 && left == num && right == num)
                                                                 {
@@ -17144,7 +17184,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 18;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeUp = true;
+                                                                    mergeUp = true;
                                                                 }
                                                                 else if (up == num && down == num && left == -1 && right == -2)
                                                                 {
@@ -17163,7 +17203,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 36;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeRight = true;
+                                                                    mergeRight = true;
                                                                 }
                                                                 else if (up == num && down == num && left == -2 && right == -1)
                                                                 {
@@ -17182,7 +17222,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 54;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeLeft = true;
+                                                                    mergeLeft = true;
                                                                 }
                                                             }
                                                             if (up != -1 && down != -1 && left == -1 && right == num)
@@ -17204,7 +17244,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 180;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeUp = true;
+                                                                    mergeUp = true;
                                                                 }
                                                                 else if (down == -2 && up == num)
                                                                 {
@@ -17223,7 +17263,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 126;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeDown = true;
+                                                                    mergeDown = true;
                                                                 }
                                                             }
                                                             else if (up != -1 && down != -1 && left == num && right == -1)
@@ -17245,7 +17285,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 180;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeUp = true;
+                                                                    mergeUp = true;
                                                                 }
                                                                 else if (down == -2 && up == num)
                                                                 {
@@ -17264,7 +17304,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 126;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeDown = true;
+                                                                    mergeDown = true;
                                                                 }
                                                             }
                                                             else if (up == -1 && down == num && left != -1 && right != -1)
@@ -17286,7 +17326,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 198;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeLeft = true;
+                                                                    mergeLeft = true;
                                                                 }
                                                                 else if (right == -2 && left == num)
                                                                 {
@@ -17305,7 +17345,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 198;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeRight = true;
+                                                                    mergeRight = true;
                                                                 }
                                                             }
                                                             else if (up == num && down == -1 && left != -1 && right != -1)
@@ -17327,7 +17367,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 216;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeLeft = true;
+                                                                    mergeLeft = true;
                                                                 }
                                                                 else if (right == -2 && left == num)
                                                                 {
@@ -17346,7 +17386,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 216;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeRight = true;
+                                                                    mergeRight = true;
                                                                 }
                                                             }
                                                             else if (up != -1 && down != -1 && left == -1 && right == -1)
@@ -17368,8 +17408,8 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 252;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeUp = true;
-                                                                    WorldGen.mergeDown = true;
+                                                                    mergeUp = true;
+                                                                    mergeDown = true;
                                                                 }
                                                                 else if (up == -2)
                                                                 {
@@ -17388,7 +17428,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 180;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeUp = true;
+                                                                    mergeUp = true;
                                                                 }
                                                                 else if (down == -2)
                                                                 {
@@ -17407,7 +17447,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 126;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeDown = true;
+                                                                    mergeDown = true;
                                                                 }
                                                             }
                                                             else if (up == -1 && down == -1 && left != -1 && right != -1)
@@ -17429,8 +17469,8 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 198;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeLeft = true;
-                                                                    WorldGen.mergeRight = true;
+                                                                    mergeLeft = true;
+                                                                    mergeRight = true;
                                                                 }
                                                                 else if (left == -2)
                                                                 {
@@ -17449,7 +17489,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 252;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeLeft = true;
+                                                                    mergeLeft = true;
                                                                 }
                                                                 else if (right == -2)
                                                                 {
@@ -17468,7 +17508,7 @@ namespace EternalLandPlugin.Game
                                                                             rectangle.Y = 252;
                                                                             break;
                                                                     }
-                                                                    WorldGen.mergeRight = true;
+                                                                    mergeRight = true;
                                                                 }
                                                             }
                                                             else if (up == -2 && down == -1 && left == -1 && right == -1)
@@ -17488,7 +17528,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 180;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeUp = true;
+                                                                mergeUp = true;
                                                             }
                                                             else if (up == -1 && down == -2 && left == -1 && right == -1)
                                                             {
@@ -17507,7 +17547,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 126;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeDown = true;
+                                                                mergeDown = true;
                                                             }
                                                             else if (up == -1 && down == -1 && left == -2 && right == -1)
                                                             {
@@ -17526,7 +17566,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 234;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeLeft = true;
+                                                                mergeLeft = true;
                                                             }
                                                             else if (up == -1 && down == -1 && left == -1 && right == -2)
                                                             {
@@ -17545,7 +17585,7 @@ namespace EternalLandPlugin.Game
                                                                         rectangle.Y = 234;
                                                                         break;
                                                                 }
-                                                                WorldGen.mergeRight = true;
+                                                                mergeRight = true;
                                                             }
                                                         }
                                                     }
@@ -17700,11 +17740,11 @@ namespace EternalLandPlugin.Game
                                                         if (!flag)
                                                         {
                                                             flag = true;
-                                                            WorldGen.TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttemptWeird(num, -1, Main.tileSolid, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         }
                                                         if (num == 2 || num == 23 || num == 60 || num == 70 || num == 109 || num == 199 || num == 477 || num == 492 || Main.tileMoss[num] || TileID.Sets.tileMossBrick[num])
                                                         {
-                                                            WorldGen.TileMergeAttempt(num, -2, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
+                                                            TileMergeAttempt(num, -2, ref up, ref down, ref left, ref right, ref upLeft, ref upRight, ref downLeft, ref downRight);
                                                         }
                                                         if (up == num && down == num && left == num && right == num)
                                                         {
@@ -18227,18 +18267,18 @@ namespace EternalLandPlugin.Game
                                                         WorldGen.tileReframeCount++;
                                                         if (WorldGen.tileReframeCount < 25)
                                                         {
-                                                            bool num50 = WorldGen.mergeUp;
-                                                            bool flag14 = WorldGen.mergeDown;
-                                                            bool flag15 = WorldGen.mergeLeft;
-                                                            bool flag16 = WorldGen.mergeRight;
+                                                            bool num50 = mergeUp;
+                                                            bool flag14 = mergeDown;
+                                                            bool flag15 = mergeLeft;
+                                                            bool flag16 = mergeRight;
                                                             TileFrame(i - 1, j);
                                                             TileFrame(i + 1, j);
                                                             TileFrame(i, j - 1);
                                                             TileFrame(i, j + 1);
-                                                            WorldGen.mergeUp = num50;
-                                                            WorldGen.mergeDown = flag14;
-                                                            WorldGen.mergeLeft = flag15;
-                                                            WorldGen.mergeRight = flag16;
+                                                            mergeUp = num50;
+                                                            mergeDown = flag14;
+                                                            mergeLeft = flag15;
+                                                            mergeRight = flag16;
                                                         }
                                                         WorldGen.tileReframeCount--;
                                                     }
@@ -18260,6 +18300,279 @@ namespace EternalLandPlugin.Game
                 if (i > 0 && j > 0)
                 {
                     UpdateMapTile(i, j);
+                }
+            }
+            public bool mergeUp;
+
+            public bool mergeDown;
+
+            public bool mergeLeft;
+
+            public bool mergeRight;
+            public void TileMergeAttemptFrametest(int i, int j, int myType, int lookfor, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (up == lookfor)
+                {
+                    TileFrame(i, j - 1);
+                    if (mergeDown)
+                    {
+                        up = myType;
+                    }
+                }
+                if (down == lookfor)
+                {
+                    TileFrame(i, j + 1);
+                    if (mergeUp)
+                    {
+                        down = myType;
+                    }
+                }
+                if (left == lookfor)
+                {
+                    TileFrame(i - 1, j);
+                    if (mergeRight)
+                    {
+                        left = myType;
+                    }
+                }
+                if (right == lookfor)
+                {
+                    TileFrame(i + 1, j);
+                    if (mergeLeft)
+                    {
+                        right = myType;
+                    }
+                }
+                if (upLeft == lookfor)
+                {
+                    upLeft = myType;
+                }
+                if (upRight == lookfor)
+                {
+                    upRight = myType;
+                }
+                if (downLeft == lookfor)
+                {
+                    downLeft = myType;
+                }
+                if (downRight == lookfor)
+                {
+                    downRight = myType;
+                }
+            }
+            public void TileMergeAttemptFrametest(int i, int j, int myType, bool[] lookfor, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (up > -1 && lookfor[up])
+                {
+                    TileFrame(i, j - 1);
+                    if (mergeDown)
+                    {
+                        up = myType;
+                    }
+                }
+                if (down > -1 && lookfor[down])
+                {
+                    TileFrame(i, j + 1);
+                    if (mergeUp)
+                    {
+                        down = myType;
+                    }
+                }
+                if (left > -1 && lookfor[left])
+                {
+                    TileFrame(i - 1, j);
+                    if (mergeRight)
+                    {
+                        left = myType;
+                    }
+                }
+                if (right > -1 && lookfor[right])
+                {
+                    TileFrame(i + 1, j);
+                    if (mergeLeft)
+                    {
+                        right = myType;
+                    }
+                }
+                if (upLeft > -1 && lookfor[upLeft])
+                {
+                    upLeft = myType;
+                }
+                if (upRight > -1 && lookfor[upRight])
+                {
+                    upRight = myType;
+                }
+                if (downLeft > -1 && lookfor[downLeft])
+                {
+                    downLeft = myType;
+                }
+                if (downRight > -1 && lookfor[downRight])
+                {
+                    downRight = myType;
+                }
+            }
+
+            public void TileMergeAttempt(int myType, int lookfor, ref int up, ref int down, ref int left, ref int right)
+            {
+                if (lookfor == up)
+                {
+                    up = myType;
+                }
+                if (lookfor == down)
+                {
+                    down = myType;
+                }
+                if (lookfor == left)
+                {
+                    left = myType;
+                }
+                if (lookfor == right)
+                {
+                    right = myType;
+                }
+            }
+
+            public void TileMergeAttempt(int myType, int lookfor, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (lookfor == up)
+                {
+                    up = myType;
+                }
+                if (lookfor == down)
+                {
+                    down = myType;
+                }
+                if (lookfor == left)
+                {
+                    left = myType;
+                }
+                if (lookfor == right)
+                {
+                    right = myType;
+                }
+                if (lookfor == upLeft)
+                {
+                    upLeft = myType;
+                }
+                if (lookfor == upRight)
+                {
+                    upRight = myType;
+                }
+                if (lookfor == downLeft)
+                {
+                    downLeft = myType;
+                }
+                if (lookfor == downRight)
+                {
+                    downRight = myType;
+                }
+            }
+
+            public void TileMergeAttempt(int myType, bool[] lookfor, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (up > -1 && lookfor[up])
+                {
+                    up = myType;
+                }
+                if (down > -1 && lookfor[down])
+                {
+                    down = myType;
+                }
+                if (left > -1 && lookfor[left])
+                {
+                    left = myType;
+                }
+                if (right > -1 && lookfor[right])
+                {
+                    right = myType;
+                }
+                if (upLeft > -1 && lookfor[upLeft])
+                {
+                    upLeft = myType;
+                }
+                if (upRight > -1 && lookfor[upRight])
+                {
+                    upRight = myType;
+                }
+                if (downLeft > -1 && lookfor[downLeft])
+                {
+                    downLeft = myType;
+                }
+                if (downRight > -1 && lookfor[downRight])
+                {
+                    downRight = myType;
+                }
+            }
+
+            public void TileMergeAttempt(int myType, bool[] lookfor, bool[] exclude, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (up > -1 && !exclude[up] && lookfor[up])
+                {
+                    up = myType;
+                }
+                if (down > -1 && !exclude[down] && lookfor[down])
+                {
+                    down = myType;
+                }
+                if (left > -1 && !exclude[left] && lookfor[left])
+                {
+                    left = myType;
+                }
+                if (right > -1 && !exclude[right] && lookfor[right])
+                {
+                    right = myType;
+                }
+                if (upLeft > -1 && !exclude[upLeft] && lookfor[upLeft])
+                {
+                    upLeft = myType;
+                }
+                if (upRight > -1 && !exclude[upRight] && lookfor[upRight])
+                {
+                    upRight = myType;
+                }
+                if (downLeft > -1 && !exclude[downLeft] && lookfor[downLeft])
+                {
+                    downLeft = myType;
+                }
+                if (downRight > -1 && !exclude[downRight] && lookfor[downRight])
+                {
+                    downRight = myType;
+                }
+            }
+
+            public void TileMergeAttemptWeird(int myType, int changeTo, bool[] exclude, ref int up, ref int down, ref int left, ref int right, ref int upLeft, ref int upRight, ref int downLeft, ref int downRight)
+            {
+                if (up > -1 && !exclude[up] && up != myType)
+                {
+                    up = changeTo;
+                }
+                if (down > -1 && !exclude[down] && down != myType)
+                {
+                    down = changeTo;
+                }
+                if (left > -1 && !exclude[left] && left != myType)
+                {
+                    left = changeTo;
+                }
+                if (right > -1 && !exclude[right] && right != myType)
+                {
+                    right = changeTo;
+                }
+                if (upLeft > -1 && !exclude[upLeft] && upLeft != myType)
+                {
+                    upLeft = changeTo;
+                }
+                if (upRight > -1 && !exclude[upRight] && upRight != myType)
+                {
+                    upRight = changeTo;
+                }
+                if (downLeft > -1 && !exclude[downLeft] && downLeft != myType)
+                {
+                    downLeft = changeTo;
+                }
+                if (downRight > -1 && !exclude[downRight] && downRight != myType)
+                {
+                    downRight = changeTo;
                 }
             }
             public void SelfFrame8Way(int i, int j, ITile centerTile, bool resetFrame)
@@ -18406,7 +18719,7 @@ namespace EternalLandPlugin.Game
                     return false;
                 }
                 bool result = false;
-                if (i >= 0 && j >= 0 && i < Main.maxTilesX && j < Main.maxTilesY)
+                if (i >= 0 && j >= 0 && i < MaxTilesX && j < MaxTilesY)
                 {
                     ITile tile = this[i, j];
                     if (tile == null)
@@ -18595,7 +18908,7 @@ namespace EternalLandPlugin.Game
                         }
                         else if (num == 61)
                         {
-                            if (j + 1 < Main.maxTilesY && this[i, j + 1].active() && this[i, j + 1].slope() == 0 && !this[i, j + 1].halfBrick() && this[i, j + 1].type == 60)
+                            if (j + 1 < MaxTilesY && this[i, j + 1].active() && this[i, j + 1].slope() == 0 && !this[i, j + 1].halfBrick() && this[i, j + 1].type == 60)
                             {
                                 if (WorldGen.genRand.Next(16) == 0 && (double)j > Main.worldSurface)
                                 {
@@ -18658,14 +18971,14 @@ namespace EternalLandPlugin.Game
                         }
                         else if (num == 71)
                         {
-                            if (j + 1 < Main.maxTilesY && this[i, j + 1].active() && this[i, j + 1].slope() == 0 && !this[i, j + 1].halfBrick() && this[i, j + 1].type == 70)
+                            if (j + 1 < MaxTilesY && this[i, j + 1].active() && this[i, j + 1].slope() == 0 && !this[i, j + 1].halfBrick() && this[i, j + 1].type == 70)
                             {
                                 Point point = new Point(-1, -1);
                                 if ((double)j > Main.worldSurface)
                                 {
                                     point = PlaceCatTail(i, j);
                                 }
-                                if (WorldGen.InWorld(point.X, point.Y))
+                                if (InWorld(point.X, point.Y))
                                 {
                                     if (WorldGen.gen)
                                     {
@@ -19235,7 +19548,7 @@ namespace EternalLandPlugin.Game
             }
             public void WallFrame(int i, int j, bool resetFrame = false)
             {
-                if (WorldGen.SkipFramingBecauseOfGen || i <= 0 || j <= 0 || i >= Main.maxTilesX - 1 || j >= Main.maxTilesY - 1 || this[i, j] == null)
+                if (WorldGen.SkipFramingBecauseOfGen || i <= 0 || j <= 0 || i >= MaxTilesX - 1 || j >= MaxTilesY - 1 || this[i, j] == null)
                 {
                     return;
                 }
@@ -19267,7 +19580,7 @@ namespace EternalLandPlugin.Game
                         num |= 2;
                     }
                 }
-                if (i + 1 <= Main.maxTilesX - 1)
+                if (i + 1 <= MaxTilesX - 1)
                 {
                     ITile tile2 = this[i + 1, j];
                     if (tile2 != null && (tile2.wall > 0 || (tile2.active() && tile2.type == 54)))
@@ -19275,7 +19588,7 @@ namespace EternalLandPlugin.Game
                         num |= 4;
                     }
                 }
-                if (j + 1 <= Main.maxTilesY - 1)
+                if (j + 1 <= MaxTilesY - 1)
                 {
                     ITile tile2 = this[i, j + 1];
                     if (tile2 != null && (tile2.wall > 0 || (tile2.active() && tile2.type == 54)))
@@ -19335,7 +19648,7 @@ namespace EternalLandPlugin.Game
                 ilgenerator.Emit(OpCodes.Ret);
                 return (Func<ITile>)dynamicMethod.CreateDelegate(typeof(Func<ITile>));
             }
-            ITile CreateTile() => GetNewTileMethod().Invoke();
+            public ITile CreateTile() => GetNewTileMethod().Invoke();
             public bool SolidTile(int i, int j, bool noDoors = false)
             {
                 try
@@ -19414,7 +19727,7 @@ namespace EternalLandPlugin.Game
             }
             public bool CanPlaceSink(int x, int y, ushort type, int style)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return false;
                 }
@@ -19616,7 +19929,7 @@ namespace EternalLandPlugin.Game
                 {
                     y++;
                 }
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -19806,7 +20119,7 @@ namespace EternalLandPlugin.Game
                 {
                     return false;
                 }
-                if (num2 > Main.maxTilesX)
+                if (num2 > MaxTilesX)
                 {
                     return false;
                 }
@@ -19814,7 +20127,7 @@ namespace EternalLandPlugin.Game
                 {
                     return false;
                 }
-                if (num4 > Main.maxTilesY)
+                if (num4 > MaxTilesY)
                 {
                     return false;
                 }
@@ -19855,7 +20168,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place3x4(int x, int y, ushort type, int style)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -19905,7 +20218,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place5x4(int x, int y, ushort type, int style)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -19963,7 +20276,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place3x1(int x, int y, ushort type, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -20006,7 +20319,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place3x2(int x, int y, ushort type, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -20082,7 +20395,7 @@ namespace EternalLandPlugin.Game
                     }
                     else if (Main.netMode == 1)
                     {
-                        NetMessage.SendData(34, -1, -1, null, 2, x, y, style);
+                        SendDataToPlayer(34, -1, -1, null, 2, x, y, style);
                     }
                 }
                 if (flag2)
@@ -20303,7 +20616,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place2x2Style(int x, int y, ushort type, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -20363,7 +20676,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place6x3(int x, int y, ushort type, int direction = -1, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -20478,7 +20791,7 @@ namespace EternalLandPlugin.Game
             }
             public void Place4x2(int x, int y, ushort type, int direction = -1, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -20687,7 +21000,7 @@ namespace EternalLandPlugin.Game
             }
             public void PlaceCannon(int x, int y, ushort type, int style = 0)
             {
-                if (x < 5 || x > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (x < 5 || x > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -21041,7 +21354,7 @@ namespace EternalLandPlugin.Game
                     {
                         num++;
                     }
-                    if (X2 < 5 || X2 > Main.maxTilesX - 5 || num < 5 || num > Main.maxTilesY - 5)
+                    if (X2 < 5 || X2 > MaxTilesX - 5 || num < 5 || num > MaxTilesY - 5)
                     {
                         return;
                     }
@@ -21100,7 +21413,7 @@ namespace EternalLandPlugin.Game
                 }
                 else
                 {
-                    if (X2 < 5 || X2 > Main.maxTilesX - 5 || Y2 < 5 || Y2 > Main.maxTilesY - 5)
+                    if (X2 < 5 || X2 > MaxTilesX - 5 || Y2 < 5 || Y2 > MaxTilesY - 5)
                     {
                         return;
                     }
@@ -21190,7 +21503,7 @@ namespace EternalLandPlugin.Game
             public void PlaceMB(int X, int y, ushort type, int style)
             {
                 int num = X + 1;
-                if (num < 5 || num > Main.maxTilesX - 5 || y < 5 || y > Main.maxTilesY - 5)
+                if (num < 5 || num > MaxTilesX - 5 || y < 5 || y > MaxTilesY - 5)
                 {
                     return;
                 }
@@ -21239,7 +21552,7 @@ namespace EternalLandPlugin.Game
             }
             public ITile GetTileSafely(int i, int j)
             {
-                if (!WorldGen.InWorld(i, j))
+                if (!InWorld(i, j))
                 {
                     return CreateTile();
                 }
@@ -21270,30 +21583,29 @@ namespace EternalLandPlugin.Game
             {
                 GetRelative(x, y, out int rx, out int ry);
                 int num = -1;
-                foreach (var key in Chest.Keys)
+                for (int i = 0; i < 8000; i++)
                 {
-                    Chest chest = Chest[key];
+                    Chest chest = Chest[i];
                     if (chest != null)
                     {
-                        if (chest.x == x && chest.y == y)
+                        if (chest.x == rx && chest.y == ry)
                         {
                             return -1;
                         }
                     }
                     else if (num == -1)
                     {
-                        num = 0;
+                        num = i;
                     }
-                    num += 1;
                 }
                 return num;
             }
             public int CreateChest(int X, int Y, int id = -1)
             {
+                GetRelative(X, Y, out int x, out int y);
                 int num = id;
                 if (num == -1)
                 {
-
                     num = FindEmptyChest(X, Y);
                     if (num == -1)
                     {
@@ -21304,11 +21616,12 @@ namespace EternalLandPlugin.Game
                         return num;
                     }
                 }
-                short cid = (short)(Chest.Keys.ToList().Max() + 1);
-                Chest.Add(cid, new Chest() { x = X, y = Y });
+                Chest[num] = new Chest();
+                Chest[num].x = x;
+                Chest[num].y = y;
                 for (int i = 0; i < 40; i++)
                 {
-                    Chest[cid].item[i] = new Item();
+                    Chest[num].item[i] = new EItem();
                 }
                 return num;
             }
@@ -21319,7 +21632,7 @@ namespace EternalLandPlugin.Game
                 {
                     return -1;
                 }
-                if (TileObject.CanPlace(x, y, type, style, 1, out TileObject objectData))
+                if (CanPlace(x, y, type, style, 1, out TileObject objectData))
                 {
                     bool flag = true;
                     if (notNearOtherChests && NearOtherChests(x - 1, y - 1))
@@ -21328,7 +21641,7 @@ namespace EternalLandPlugin.Game
                     }
                     if (flag)
                     {
-                        TileObject.Place(objectData);
+                        Place(objectData);
                         num = CreateChest(objectData.xCoord, objectData.yCoord);
                     }
                 }
@@ -21337,6 +21650,20 @@ namespace EternalLandPlugin.Game
                     num = -1;
                 }
                 return num;
+            }
+            public int UsingChest(int i)
+            {
+                if (Chest[i] != null)
+                {
+                    for (int j = 0; j < 255; j++)
+                    {
+                        if (Main.player[j].active && Main.player[j].chest == i)
+                        {
+                            return j;
+                        }
+                    }
+                }
+                return -1;
             }
             public bool PlaceSign(int x, int y, ushort type, int Style = 0)
             {
@@ -21348,7 +21675,7 @@ namespace EternalLandPlugin.Game
                 {
                     return false;
                 }
-                if (num2 > Main.maxTilesX)
+                if (num2 > MaxTilesX)
                 {
                     return false;
                 }
@@ -21356,7 +21683,7 @@ namespace EternalLandPlugin.Game
                 {
                     return false;
                 }
-                if (num4 > Main.maxTilesY)
+                if (num4 > MaxTilesY)
                 {
                     return false;
                 }
@@ -22361,7 +22688,7 @@ namespace EternalLandPlugin.Game
                 }
                 int num = x - tileData.Origin.X;
                 int num2 = y - tileData.Origin.Y;
-                if (num < 0 || num + tileData.Width >= Main.maxTilesX || num2 < 0 || num2 + tileData.Height >= Main.maxTilesY)
+                if (num < 0 || num + tileData.Width >= MaxTilesX || num2 < 0 || num2 + tileData.Height >= MaxTilesY)
                 {
                     return false;
                 }
@@ -22391,7 +22718,7 @@ namespace EternalLandPlugin.Game
                     }
                     int num8 = x - tileData2.Origin.X;
                     int num9 = y - tileData2.Origin.Y;
-                    if (num8 < 5 || num8 + tileData2.Width > Main.maxTilesX - 5 || num9 < 5 || num9 + tileData2.Height > Main.maxTilesY - 5)
+                    if (num8 < 5 || num8 + tileData2.Width > MaxTilesX - 5 || num9 < 5 || num9 + tileData2.Height > MaxTilesY - 5)
                     {
                         return false;
                     }
@@ -22941,7 +23268,7 @@ namespace EternalLandPlugin.Game
             public bool PlaceLilyPad(int x, int j)
             {
                 int num = j;
-                if (x < 50 || x > Main.maxTilesX - 50 || num < 50 || num > Main.maxTilesY - 50)
+                if (x < 50 || x > MaxTilesX - 50 || num < 50 || num > MaxTilesY - 50)
                 {
                     return false;
                 }
@@ -22979,7 +23306,7 @@ namespace EternalLandPlugin.Game
                     return false;
                 }
                 int l;
-                for (l = num; (!this[x, l].active() || !Main.tileSolid[this[x, l].type] || Main.tileSolidTop[this[x, l].type]) && l < Main.maxTilesY - 50; l++)
+                for (l = num; (!this[x, l].active() || !Main.tileSolid[this[x, l].type] || Main.tileSolidTop[this[x, l].type]) && l < MaxTilesY - 50; l++)
                 {
                     if (this[x, l].active() && this[x, l].type == 519)
                     {
@@ -23025,7 +23352,7 @@ namespace EternalLandPlugin.Game
                 }
                 else
                 {
-                    int num6 = Main.maxTilesX / 5;
+                    int num6 = MaxTilesX / 5;
                     if (x < num6)
                     {
                         this[x, num].frameX = (short)(18 * WorldGen.genRand.Next(6, 9));
@@ -23057,7 +23384,7 @@ namespace EternalLandPlugin.Game
             {
                 int num = j;
                 Point result = new Point(-1, -1);
-                if (x < 50 || x > Main.maxTilesX - 50 || num < 50 || num > Main.maxTilesY - 50)
+                if (x < 50 || x > MaxTilesX - 50 || num < 50 || num > MaxTilesY - 50)
                 {
                     return result;
                 }
@@ -23096,7 +23423,7 @@ namespace EternalLandPlugin.Game
                     return result;
                 }
                 int l;
-                for (l = num; (!this[x, l].active() || !Main.tileSolid[this[x, l].type] || Main.tileSolidTop[this[x, l].type]) && l < Main.maxTilesY - 50; l++)
+                for (l = num; (!this[x, l].active() || !Main.tileSolid[this[x, l].type] || Main.tileSolidTop[this[x, l].type]) && l < MaxTilesY - 50; l++)
                 {
                     if (this[x, l].active() && this[x, l].type != 71)
                     {
@@ -23125,7 +23452,7 @@ namespace EternalLandPlugin.Game
                         num5 = 0;
                         break;
                     case 53:
-                        if (x < WorldGen.beachDistance || x > Main.maxTilesX - WorldGen.beachDistance)
+                        if (x < WorldGen.beachDistance || x > MaxTilesX - WorldGen.beachDistance)
                         {
                             return result;
                         }
@@ -23178,7 +23505,7 @@ namespace EternalLandPlugin.Game
                 }
                 num++;
                 int i;
-                for (i = num; (!this[x, i].active() || !Main.tileSolid[this[x, i].type] || Main.tileSolidTop[this[x, i].type]) && i < Main.maxTilesY - 50; i++)
+                for (i = num; (!this[x, i].active() || !Main.tileSolid[this[x, i].type] || Main.tileSolidTop[this[x, i].type]) && i < MaxTilesY - 50; i++)
                 {
                 }
                 num = i - 1;
@@ -23192,7 +23519,7 @@ namespace EternalLandPlugin.Game
                     KillTile(x, num - 1);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(17, -1, -1, null, 0, x, num - 1);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, num - 1);
                     }
                 }
                 if (this[x, num - 1].active())
@@ -23274,14 +23601,12 @@ namespace EternalLandPlugin.Game
                 int num = 45;
                 int num2 = 20;
                 int num3 = 20;
-                int num4 = -1;
                 int num5 = num + 1;
                 int num6 = 0;
                 bool flag = false;
-                if (x <= WorldGen.beachDistance || x >= Main.maxTilesX - WorldGen.beachDistance)
+                if (x <= WorldGen.beachDistance || x >= MaxTilesX - WorldGen.beachDistance)
                 {
                     flag = true;
-                    num4 = 40;
                     num = 65;
                     num2 += 5;
                 }
@@ -23289,7 +23614,7 @@ namespace EternalLandPlugin.Game
                 {
                     for (int j = y - num2; j <= y + num2; j++)
                     {
-                        if (WorldGen.InWorld(i, j) && !SolidTile(i, j) && this[i, j].liquid > 0)
+                        if (InWorld(i, j) && !SolidTile(i, j) && this[i, j].liquid > 0)
                         {
                             num6 += this[i, j].liquid;
                             int num7 = Math.Abs(i - x);
@@ -23343,7 +23668,7 @@ namespace EternalLandPlugin.Game
                 while (!SolidTile(x, num))
                 {
                     num++;
-                    if (num > Main.maxTilesY - 1)
+                    if (num > MaxTilesY - 1)
                     {
                         return 0;
                     }
@@ -23470,7 +23795,7 @@ namespace EternalLandPlugin.Game
             }
             public bool CanUnderwaterPlantGrowHere(ushort type, int x, int y, bool ignoreSelf)
             {
-                if (!WorldGen.InWorld(x, y, 50))
+                if (!InWorld(x, y, 50))
                 {
                     return false;
                 }
@@ -23555,7 +23880,7 @@ namespace EternalLandPlugin.Game
             }
             public bool IsFitToPlaceFlowerIn(int x, int y, int typeAttemptedToPlace)
             {
-                if (y < 1 || y > Main.maxTilesY - 1)
+                if (y < 1 || y > MaxTilesY - 1)
                 {
                     return false;
                 }
@@ -23586,12 +23911,12 @@ namespace EternalLandPlugin.Game
                     KillTile(x, y);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(17, -1, -1, null, 0, x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
                     }
                     return;
                 }
                 int num = y;
-                while ((!this[x, num].active() || !Main.tileSolid[this[x, num].type] || Main.tileSolidTop[this[x, num].type]) && num < Main.maxTilesY - 50)
+                while ((!this[x, num].active() || !Main.tileSolid[this[x, num].type] || Main.tileSolidTop[this[x, num].type]) && num < MaxTilesY - 50)
                 {
                     num++;
                     if (this[x, num] == null)
@@ -23669,7 +23994,7 @@ namespace EternalLandPlugin.Game
                             KillTile(x, y);
                             if (Main.netMode == 2)
                             {
-                                NetMessage.SendData(17, -1, -1, null, 0, x, y);
+                                SendDataToPlayer(17, -1, -1, null, 0, x, y);
                             }
                         }
                     }
@@ -23679,14 +24004,34 @@ namespace EternalLandPlugin.Game
                     KillTile(x, y);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(17, -1, -1, null, 0, x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
                     }
                 }
             }
+            [IgnoreMember]
             int numTreeShakes = 0;
+            [IgnoreMember]
             int maxTreeShakes = 200;
+            [IgnoreMember]
             int[] treeShakeX = new int[200];
+            [IgnoreMember]
             int[] treeShakeY = new int[200];
+            public bool IsTileALeafyTreeTop(int i, int j)
+            {
+                ITile tileSafely = GetTileSafely(i, j);
+                if (tileSafely.active() && TileID.Sets.GetsCheckedForLeaves[tileSafely.type])
+                {
+                    if (tileSafely.type == 323 && tileSafely.frameX >= 88)
+                    {
+                        return true;
+                    }
+                    if (tileSafely.frameX == 22 && tileSafely.frameY >= 198 && tileSafely.frameY <= 242)
+                    {
+                        return true;
+                    }
+                }
+                return false;
+            }
             public void ShakeTree(int i, int j)
             {
                 if (numTreeShakes == maxTreeShakes)
@@ -23716,7 +24061,7 @@ namespace EternalLandPlugin.Game
                     y--;
                 }
                 y++;
-                if (!WorldGen.IsTileALeafyTreeTop(x, y) || SolidTiles(x - 2, x + 2, y - 2, y + 2))
+                if (!IsTileALeafyTreeTop(x, y) || SolidTiles(x - 2, x + 2, y - 2, y + 2))
                 {
                     return;
                 }
@@ -23953,13 +24298,13 @@ namespace EternalLandPlugin.Game
                     WorldGen.GetTreeLeaf(x, this[x, y], this[x, y2], ref treeHeight, out treeFrame, out passStyle);
                     if (Main.netMode == 2)
                     {
-                        NetMessage.SendData(112, -1, -1, null, 1, x, y, 1f, passStyle);
+                        SendDataToPlayer(112, -1, -1, null, 1, x, y, 1f, passStyle);
                     }
                 }
             }
             public void KillTile(int i, int j, bool fail = false, bool effectOnly = false, bool noItem = false)
             {
-                if (i < 0 || j < 0 || i >= Main.maxTilesX || j >= Main.maxTilesY)
+                if (i < 0 || j < 0 || i >= MaxTilesX || j >= MaxTilesY)
                 {
                     return;
                 }
@@ -24078,7 +24423,7 @@ namespace EternalLandPlugin.Game
                             int num11 = NewItem(i * 16, j * 16, 16, 16, num10, 1, noBroadcast: true);
                             item.position = Main.item[num11].position;
                             Main.item[num11] = item;
-                            NetMessage.SendData(21, -1, -1, null, num11);
+                            SendDataToPlayer(21, -1, -1, null, num11);
                         }
                         frameX = this[num7, j].frameX;
                         int num12 = 0;
@@ -24469,7 +24814,7 @@ namespace EternalLandPlugin.Game
                             KillTile(k, l, fail: false, effectOnly: false, noItem: true);
                             if (Main.netMode == 2)
                             {
-                                NetMessage.SendData(17, -1, -1, null, 0, k, l);
+                                SendDataToPlayer(17, -1, -1, null, 0, k, l);
                             }
                         }
                     }
@@ -24510,7 +24855,7 @@ namespace EternalLandPlugin.Game
             public int CheckTileBreakability(int x, int y)
             {
                 ITile tile = this[x, y];
-                if (y >= 1 && y <= Main.maxTilesY - 1)
+                if (y >= 1 && y <= MaxTilesY - 1)
                 {
                     ITile tile2 = this[x, y - 1];
                     ITile tile3 = this[x, y + 1];
@@ -24640,11 +24985,11 @@ namespace EternalLandPlugin.Game
             }
             public bool DestroyChest(int X, int Y)
             {
-                GetRelative(X, Y, out int rx, out int ry);
-                foreach (var key in Chest.Keys)
+                GetRelative(X, Y, out int x, out int y);
+                for (int i = 0; i < 8000; i++)
                 {
-                    Chest chest = Chest[key];
-                    if (chest == null || chest.x != rx || chest.y != ry)
+                    Chest chest = Chest[i];
+                    if (chest == null || chest.x != x || chest.y != y)
                     {
                         continue;
                     }
@@ -24655,8 +25000,8 @@ namespace EternalLandPlugin.Game
                             return false;
                         }
                     }
-                    Chest.Remove(key);
-                    if (Main.player[Main.myPlayer].chest == key)
+                    Chest[i] = null;
+                    if (Main.player[Main.myPlayer].chest == i)
                     {
                         Main.player[Main.myPlayer].chest = -1;
                     }
@@ -24758,10 +25103,10 @@ namespace EternalLandPlugin.Game
                 int value2 = (int)((Position.X + (float)Width) / 16f) + 2;
                 int value3 = (int)(Position.Y / 16f) - 1;
                 int value4 = (int)((Position.Y + (float)Height) / 16f) + 2;
-                int num3 = Terraria.Utils.Clamp(value, 0, Main.maxTilesX - 1);
-                value2 = Terraria.Utils.Clamp(value2, 0, Main.maxTilesX - 1);
-                value3 = Terraria.Utils.Clamp(value3, 0, Main.maxTilesY - 1);
-                value4 = Terraria.Utils.Clamp(value4, 0, Main.maxTilesY - 1);
+                int num3 = Terraria.Utils.Clamp(value, 0, MaxTilesX - 1);
+                value2 = Terraria.Utils.Clamp(value2, 0, MaxTilesX - 1);
+                value3 = Terraria.Utils.Clamp(value3, 0, MaxTilesY - 1);
+                value4 = Terraria.Utils.Clamp(value4, 0, MaxTilesY - 1);
                 Vector2 vector2 = default(Vector2);
                 for (int i = num3; i < value2; i++)
                 {
@@ -24811,13 +25156,20 @@ namespace EternalLandPlugin.Game
                 }
                 return false;
             }
-
+            #endregion
             public void Initialize()
             {
                 InitializeMinecart();
                 InitializeWiring();
+                for (int j = 0; j < maxLiquid; j++)
+                {
+                    Liquid[j] = new Liquid();
+                }
+                for (int k = 0; k < 50000; k++)
+                {
+                    LiquidBuffer[k] = new LiquidBuffer();
+                }
             }
-
             #region 矿车
             public enum TrackState
             {
@@ -24876,29 +25228,29 @@ namespace EternalLandPlugin.Game
             public const int Type_Pressure = 1;
 
             public const int Type_Booster = 2;
-
+            [IgnoreMember]
             public Vector2 _trackMagnetOffset = new Vector2(25f, 26f);
 
             public const float MinecartTextureWidth = 50f;
-
+            [IgnoreMember]
             public int[] _leftSideConnection;
-
+            [IgnoreMember]
             public int[] _rightSideConnection;
-
+            [IgnoreMember]
             public int[] _trackType;
-
+            [IgnoreMember]
             public bool[] _boostLeft;
-
+            [IgnoreMember]
             public Vector2[] _texturePosition;
-
+            [IgnoreMember]
             public short _firstPressureFrame;
-
+            [IgnoreMember]
             public short _firstLeftBoostFrame;
-
+            [IgnoreMember]
             public short _firstRightBoostFrame;
-
+            [IgnoreMember]
             public int[][] _trackSwitchOptions;
-
+            [IgnoreMember]
             public int[][] _tileHeight;
 
             public void InitializeMinecart()
@@ -26389,7 +26741,10 @@ namespace EternalLandPlugin.Game
                 }
                 return true;
             }
-
+            public ITile GetTileSafely(Point pt)
+            {
+                return GetTileSafely(pt.X, pt.Y);
+            }
             public void TryFittingTileOrientation(Point tileCoords, int? expectedYOffsetForLeft, int? expectedYOffsetForRight)
             {
                 int nearbyTilesSetLookupIndex = GetNearbyTilesSetLookupIndex(tileCoords.X, tileCoords.Y);
@@ -26398,7 +26753,7 @@ namespace EternalLandPlugin.Game
                 {
                     return;
                 }
-                ITile tileSafely = Framing.GetTileSafely(tileCoords);
+                ITile tileSafely = GetTileSafely(tileCoords);
                 int num = _trackType[tileSafely.FrontTrack()];
                 int? num2 = null;
                 foreach (int num3 in array)
@@ -26471,58 +26826,327 @@ namespace EternalLandPlugin.Game
                 }
             }
             #endregion
-
             #region  电路
+            [MessagePackObject(keyAsPropertyName: true)]
+            [Serializable]
+            public class DoubleStack<T1>
+            {
+                [IgnoreMember]
+                public T1[][] _segmentList;
+
+                public readonly int _segmentSize;
+
+                public int _segmentCount;
+
+                public readonly int _segmentShiftPosition;
+
+                public int _start;
+
+                public int _end;
+
+                public int _size;
+
+                public int _last;
+
+                public int Count => _size;
+
+                public DoubleStack(int segmentSize = 1024, int initialSize = 0)
+                {
+                    if (segmentSize < 16)
+                    {
+                        segmentSize = 16;
+                    }
+                    _start = segmentSize / 2;
+                    _end = _start;
+                    _size = 0;
+                    _segmentShiftPosition = segmentSize + _start;
+                    initialSize += _start;
+                    int num = initialSize / segmentSize + 1;
+                    _segmentList = new T1[num][];
+                    for (int i = 0; i < num; i++)
+                    {
+                        _segmentList[i] = new T1[segmentSize];
+                    }
+                    _segmentSize = segmentSize;
+                    _segmentCount = num;
+                    _last = _segmentSize * _segmentCount - 1;
+                }
+
+                public void PushFront(T1 front)
+                {
+                    if (_start == 0)
+                    {
+                        T1[][] array = new T1[_segmentCount + 1][];
+                        for (int i = 0; i < _segmentCount; i++)
+                        {
+                            array[i + 1] = _segmentList[i];
+                        }
+                        array[0] = new T1[_segmentSize];
+                        _segmentList = array;
+                        _segmentCount++;
+                        _start += _segmentSize;
+                        _end += _segmentSize;
+                        _last += _segmentSize;
+                    }
+                    _start--;
+                    T1[] obj = _segmentList[_start / _segmentSize];
+                    int num = _start % _segmentSize;
+                    obj[num] = front;
+                    _size++;
+                }
+
+                public T1 PopFront()
+                {
+                    if (_size == 0)
+                    {
+                        throw new InvalidOperationException("The DoubleStack is empty.");
+                    }
+                    T1[] obj = _segmentList[_start / _segmentSize];
+                    int num = _start % _segmentSize;
+                    T1 result = obj[num];
+                    obj[num] = default(T1);
+                    _start++;
+                    _size--;
+                    if (_start >= _segmentShiftPosition)
+                    {
+                        T1[] array = _segmentList[0];
+                        for (int i = 0; i < _segmentCount - 1; i++)
+                        {
+                            _segmentList[i] = _segmentList[i + 1];
+                        }
+                        _segmentList[_segmentCount - 1] = array;
+                        _start -= _segmentSize;
+                        _end -= _segmentSize;
+                    }
+                    if (_size == 0)
+                    {
+                        _start = _segmentSize / 2;
+                        _end = _start;
+                    }
+                    return result;
+                }
+
+                public T1 PeekFront()
+                {
+                    if (_size == 0)
+                    {
+                        throw new InvalidOperationException("The DoubleStack is empty.");
+                    }
+                    T1[] obj = _segmentList[_start / _segmentSize];
+                    int num = _start % _segmentSize;
+                    return obj[num];
+                }
+
+                public void PushBack(T1 back)
+                {
+                    if (_end == _last)
+                    {
+                        T1[][] array = new T1[_segmentCount + 1][];
+                        for (int i = 0; i < _segmentCount; i++)
+                        {
+                            array[i] = _segmentList[i];
+                        }
+                        array[_segmentCount] = new T1[_segmentSize];
+                        _segmentCount++;
+                        _segmentList = array;
+                        _last += _segmentSize;
+                    }
+                    T1[] obj = _segmentList[_end / _segmentSize];
+                    int num = _end % _segmentSize;
+                    obj[num] = back;
+                    _end++;
+                    _size++;
+                }
+
+                public T1 PopBack()
+                {
+                    if (_size == 0)
+                    {
+                        throw new InvalidOperationException("The DoubleStack is empty.");
+                    }
+                    T1[] obj = _segmentList[_end / _segmentSize];
+                    int num = _end % _segmentSize;
+                    T1 result = obj[num];
+                    obj[num] = default(T1);
+                    _end--;
+                    _size--;
+                    if (_size == 0)
+                    {
+                        _start = _segmentSize / 2;
+                        _end = _start;
+                    }
+                    return result;
+                }
+
+                public T1 PeekBack()
+                {
+                    if (_size == 0)
+                    {
+                        throw new InvalidOperationException("The DoubleStack is empty.");
+                    }
+                    T1[] obj = _segmentList[_end / _segmentSize];
+                    int num = _end % _segmentSize;
+                    return obj[num];
+                }
+
+                public void Clear(bool quickClear = false)
+                {
+                    if (!quickClear)
+                    {
+                        for (int i = 0; i < _segmentCount; i++)
+                        {
+                            Array.Clear(_segmentList[i], 0, _segmentSize);
+                        }
+                    }
+                    _start = _segmentSize / 2;
+                    _end = _start;
+                    _size = 0;
+                }
+            }
+            [MessagePackObject(keyAsPropertyName: true)]
+            [Serializable]
+            public struct Point16
+            {
+                public readonly short X;
+
+                public readonly short Y;
+                [IgnoreMember]
+                public static Point16 Zero = new Point16(0, 0);
+                [IgnoreMember]
+                public static Point16 NegativeOne = new Point16(-1, -1);
+
+                public Point16(Point point)
+                {
+                    X = (short)point.X;
+                    Y = (short)point.Y;
+                }
+
+                public Point16(int X, int Y)
+                {
+                    this.X = (short)X;
+                    this.Y = (short)Y;
+                }
+
+                public Point16(short X, short Y)
+                {
+                    this.X = X;
+                    this.Y = Y;
+                }
+
+                public static Point16 Max(int firstX, int firstY, int secondX, int secondY)
+                {
+                    return new Point16((firstX > secondX) ? firstX : secondX, (firstY > secondY) ? firstY : secondY);
+                }
+
+                public Point16 Max(int compareX, int compareY)
+                {
+                    return new Point16((X > compareX) ? X : compareX, (Y > compareY) ? Y : compareY);
+                }
+
+                public Point16 Max(Point16 compareTo)
+                {
+                    return new Point16((X > compareTo.X) ? X : compareTo.X, (Y > compareTo.Y) ? Y : compareTo.Y);
+                }
+
+                public static bool operator ==(Point16 first, Point16 second)
+                {
+                    if (first.X == second.X)
+                    {
+                        return first.Y == second.Y;
+                    }
+                    return false;
+                }
+
+                public static bool operator !=(Point16 first, Point16 second)
+                {
+                    if (first.X == second.X)
+                    {
+                        return first.Y != second.Y;
+                    }
+                    return true;
+                }
+
+                public static implicit operator Point16(Terraria.DataStructures.Point16 v)
+                {
+                    return new Point16(v.X, v.Y);
+                }
+
+                public static implicit operator Terraria.DataStructures.Point16(Point16 v)
+                {
+                    return new Terraria.DataStructures.Point16(v.X, v.Y);
+                }
+
+                public override bool Equals(object obj)
+                {
+                    Point16 point = (Point16)obj;
+                    if (X != point.X || Y != point.Y)
+                    {
+                        return false;
+                    }
+                    return true;
+                }
+
+                public override int GetHashCode()
+                {
+                    return (X << 16) | (ushort)Y;
+                }
+
+                public override string ToString()
+                {
+                    return $"{{{X}, {Y}}}";
+                }
+            }
+
             public bool blockPlayerTeleportationForOneIteration;
 
             public bool running;
-
+            [IgnoreMember]
             public Dictionary<Point16, bool> _wireSkip;
-
+            [IgnoreMember]
             public DoubleStack<Point16> _wireList;
-
+            [IgnoreMember]
             public DoubleStack<byte> _wireDirectionList;
-
+            [IgnoreMember]
             public Dictionary<Point16, byte> _toProcess;
-
+            [IgnoreMember]
             public Queue<Point16> _GatesCurrent;
-
+            [IgnoreMember]
             public Queue<Point16> _LampsToCheck;
-
+            [IgnoreMember]
             public Queue<Point16> _GatesNext;
-
+            [IgnoreMember]
             public Dictionary<Point16, bool> _GatesDone;
-
+            [IgnoreMember]
             public Dictionary<Point16, byte> _PixelBoxTriggers;
-
+            [IgnoreMember]
             public Vector2[] _teleport;
 
             public const int MaxPump = 20;
-
+            [IgnoreMember]
             public int[] _inPumpX;
-
+            [IgnoreMember]
             public int[] _inPumpY;
-
+            [IgnoreMember]
             public int _numInPump;
-
+            [IgnoreMember]
             public int[] _outPumpX;
-
+            [IgnoreMember]
             public int[] _outPumpY;
-
+            [IgnoreMember]
             public int _numOutPump;
-
+            [IgnoreMember]
             public const int MaxMech = 1000;
-
+            [IgnoreMember]
             public int[] _mechX;
-
+            [IgnoreMember]
             public int[] _mechY;
-
+            [IgnoreMember]
             public int _numMechs;
-
+            [IgnoreMember]
             public int[] _mechTime;
-
+            [IgnoreMember]
             public int _currentWireColor;
-
+            [IgnoreMember]
             public int CurrentUser = 255;
 
             public void SetCurrentUser(int plr = -1)
@@ -26650,7 +27274,7 @@ namespace EternalLandPlugin.Game
 
             public void HitSwitch(int i, int j)
             {
-                if (!WorldGen.InWorld(i, j) || this[i, j] == null)
+                if (!InWorld(i, j) || this[i, j] == null)
                 {
                     return;
                 }
@@ -26753,7 +27377,7 @@ namespace EternalLandPlugin.Game
                             }
                         }
                     }
-                    WorldGen.TileFrame(num6, num7);
+                    TileFrame(num6, num7);
                     TripWire(num6, num7, 2, 2);
                 }
             }
@@ -27347,7 +27971,7 @@ namespace EternalLandPlugin.Game
             }
             public void CheckLogicGate(int lampX, int lampY)
             {
-                if (!WorldGen.InWorld(lampX, lampY, 1))
+                if (!InWorld(lampX, lampY, 1))
                 {
                     return;
                 }
@@ -27355,7 +27979,7 @@ namespace EternalLandPlugin.Game
                 ITile tile;
                 while (true)
                 {
-                    if (num < Main.maxTilesY)
+                    if (num < MaxTilesY)
                     {
                         tile = this[lampX, num];
                         if (!tile.active())
@@ -27519,7 +28143,7 @@ namespace EternalLandPlugin.Game
                                 num3 = y + 1;
                                 break;
                         }
-                        if (num2 < 2 || num2 >= Main.maxTilesX - 2 || num3 < 2 || num3 >= Main.maxTilesY - 2)
+                        if (num2 < 2 || num2 >= MaxTilesX - 2 || num3 < 2 || num3 >= MaxTilesY - 2)
                         {
                             continue;
                         }
@@ -27854,7 +28478,7 @@ namespace EternalLandPlugin.Game
                     Color pink = Color.Pink;
                     if (Main.AnnouncementBoxRange == -1)
                     {
-                            Utils.Broadcast("[Internal Error]事件禁用.");
+                        Utils.Broadcast("[Internal Error]事件禁用.");
                     }
                     else
                     {
@@ -28084,10 +28708,10 @@ namespace EternalLandPlugin.Game
                 if (type == 387 || type == 386)
                 {
                     bool value = type == 387;
-                    int num68 = WorldGen.ShiftTrapdoor(i, j, playerAbove: true).ToInt();
+                    int num68 = ShiftTrapdoor(i, j, playerAbove: true).ToInt();
                     if (num68 == 0)
                     {
-                        num68 = -WorldGen.ShiftTrapdoor(i, j, playerAbove: false).ToInt();
+                        num68 = -ShiftTrapdoor(i, j, playerAbove: false).ToInt();
                     }
                     if (num68 != 0)
                     {
@@ -29166,7 +29790,7 @@ namespace EternalLandPlugin.Game
                                     case 37:
                                         if (CheckMech(num134, num133, 600) && Item.MechSpawn(num137, num138, 58) && Item.MechSpawn(num137, num138, 1734) && Item.MechSpawn(num137, num138, 1867))
                                         {
-                                            Item.NewItem(num137, num138 - 16, 0, 0, 58);
+                                            NewItem(num137, num138 - 16, 0, 0, 58);
                                         }
                                         break;
                                     case 50:
@@ -29185,13 +29809,13 @@ namespace EternalLandPlugin.Game
                                     case 2:
                                         if (CheckMech(num134, num133, 600) && Item.MechSpawn(num137, num138, 184) && Item.MechSpawn(num137, num138, 1735) && Item.MechSpawn(num137, num138, 1868))
                                         {
-                                            Item.NewItem(num137, num138 - 16, 0, 0, 184);
+                                            NewItem(num137, num138 - 16, 0, 0, 184);
                                         }
                                         break;
                                     case 17:
                                         if (CheckMech(num134, num133, 600) && Item.MechSpawn(num137, num138, 166))
                                         {
-                                            Item.NewItem(num137, num138 - 20, 0, 0, 166);
+                                            NewItem(num137, num138 - 20, 0, 0, 166);
                                         }
                                         break;
                                     case 40:
@@ -29337,6 +29961,134 @@ namespace EternalLandPlugin.Game
                         break;
                 }
             }
+            public bool ShiftTrapdoor(int x, int y, bool playerAbove, int onlyCloseOrOpen = -1)
+            {
+                ITile tileSafely = GetTileSafely(x, y);
+                if (tileSafely.type == 386 && onlyCloseOrOpen != 1)
+                {
+                    Point topLeftAndStyles = GetTopLeftAndStyles(ref x, ref y, 2, 2, 18, 18);
+                    if (topLeftAndStyles.X == 0)
+                    {
+                        if (Main.netMode != 1 && Wiring.running)
+                        {
+                            SkipWire(x, y);
+                            SkipWire(x, y + 1);
+                            SkipWire(x + 1, y);
+                            SkipWire(x + 1, y + 1);
+                        }
+                        if (!EmptyTile(x, y + 1, ignoreTiles: true) || !EmptyTile(x + 1, y + 1, ignoreTiles: true))
+                        {
+                            return false;
+                        }
+                        for (int i = 0; i < 2; i++)
+                        {
+                            tileSafely = GetTileSafely(x + i, y);
+                            tileSafely.ClearTile();
+                        }
+                        for (int j = 0; j < 2; j++)
+                        {
+                            tileSafely = GetTileSafely(x + j, y + 1);
+                            tileSafely.type = 387;
+                            tileSafely.frameX = (short)(j * 18);
+                            tileSafely.frameY = (short)(topLeftAndStyles.Y * 18);
+                        }
+                        for (int k = -1; k < 3; k++)
+                        {
+                            for (int l = 0; l < 3; l++)
+                            {
+                                TileFrame(x + k, y + l);
+                            }
+                        }
+                        return true;
+                    }
+                    if (topLeftAndStyles.X == 1)
+                    {
+                        if (Main.netMode != 1 && Wiring.running)
+                        {
+                            SkipWire(x, y - 1);
+                            SkipWire(x, y);
+                            SkipWire(x + 1, y - 1);
+                            SkipWire(x + 1, y);
+                        }
+                        if (!EmptyTile(x, y, ignoreTiles: true) || !EmptyTile(x + 1, y, ignoreTiles: true))
+                        {
+                            return false;
+                        }
+                        for (int m = 0; m < 2; m++)
+                        {
+                            tileSafely = GetTileSafely(x + m, y + 1);
+                            tileSafely.ClearTile();
+                        }
+                        for (int n = 0; n < 2; n++)
+                        {
+                            tileSafely = GetTileSafely(x + n, y);
+                            tileSafely.type = 387;
+                            tileSafely.frameX = (short)(n * 18);
+                            tileSafely.frameY = (short)(topLeftAndStyles.Y * 18);
+                        }
+                        for (int num = -1; num < 3; num++)
+                        {
+                            for (int num2 = -1; num2 < 2; num2++)
+                            {
+                                TileFrame(x + num, y + num2);
+                            }
+                        }
+                        return true;
+                    }
+                }
+                if (tileSafely.type == 387 && onlyCloseOrOpen != 0)
+                {
+                    GetTopLeftAndStyles(ref x, ref y, 2, 1, 18, 18);
+                    int num3 = playerAbove.ToDirectionInt();
+                    for (int num4 = 0; num4 < 2; num4++)
+                    {
+                        tileSafely = GetTileSafely(x + num4, y + num3);
+                        if (tileSafely.active() && !Main.tileCut[tileSafely.type])
+                        {
+                            return false;
+                        }
+                    }
+                    if (Main.netMode != 1 && running)
+                    {
+                        SkipWire(x, y);
+                        SkipWire(x, y + num3);
+                        SkipWire(x + 1, y);
+                        SkipWire(x + 1, y + num3);
+                    }
+                    for (int num5 = 0; num5 < 2; num5++)
+                    {
+                        tileSafely = GetTileSafely(x + num5, y + num3);
+                        if (tileSafely.active() && Main.tileCut[tileSafely.type])
+                        {
+                            KillTile(x + num5, y + num3);
+                        }
+                    }
+                    for (int num6 = 0; num6 < 2; num6++)
+                    {
+                        tileSafely = GetTileSafely(x + num6, y);
+                        byte color = tileSafely.color();
+                        for (int num7 = 0; num7 < 2; num7++)
+                        {
+                            tileSafely = GetTileSafely(x + num6, y + num7 - (!playerAbove).ToInt());
+                            tileSafely.type = 386;
+                            tileSafely.frameX = (short)(num6 * 18 + playerAbove.ToInt() * 36);
+                            tileSafely.frameY = (short)(num7 * 18);
+                            tileSafely.color(color);
+                            tileSafely.active(active: true);
+                        }
+                    }
+                    for (int num8 = -1; num8 < 3; num8++)
+                    {
+                        for (int num9 = -1; num9 < 3; num9++)
+                        {
+                            TileFrame(x + num8, y + num9 - (!playerAbove).ToInt() * 2);
+                        }
+                    }
+                    return true;
+                }
+                return false;
+            }
+
             public void SendTileRange(int whoAmi, int tileX, int tileY, int xSize, int ySize, TileChangeType changeType = TileChangeType.None)
             {
                 int number = (xSize >= ySize) ? xSize : ySize;
@@ -29408,7 +30160,7 @@ namespace EternalLandPlugin.Game
                 {
                     return true;
                 }
-                if (endX >= Main.maxTilesX)
+                if (endX >= MaxTilesX)
                 {
                     return true;
                 }
@@ -29416,7 +30168,7 @@ namespace EternalLandPlugin.Game
                 {
                     return true;
                 }
-                if (endY >= Main.maxTilesY)
+                if (endY >= MaxTilesY)
                 {
                     return true;
                 }
@@ -29678,7 +30430,7 @@ namespace EternalLandPlugin.Game
                     return rectangle.Height <= teleporter.Height + entity.Height;
                 }
                 return false;
-            }           
+            }
             public void MassWireOperationInner(Point ps, Point pe, Vector2 dropPoint, bool dir, ref int wireCount, ref int actuatorCount)
             {
                 Math.Abs(ps.X - pe.X);
@@ -29774,7 +30526,7 @@ namespace EternalLandPlugin.Game
 
             public bool? MassWireOperationStep(Point pt, WiresUI.Settings.MultiToolMode mode, ref int wiresLeftToConsume, ref int actuatorsLeftToConstume)
             {
-                if (!WorldGen.InWorld(pt.X, pt.Y, 1))
+                if (!InWorld(pt.X, pt.Y, 1))
                 {
                     return null;
                 }
@@ -29792,7 +30544,7 @@ namespace EternalLandPlugin.Game
                             return false;
                         }
                         wiresLeftToConsume--;
-                        WorldGen.PlaceWire(pt.X, pt.Y);
+                        PlaceWire(pt.X, pt.Y);
                         SendDataToPlayer(17, -1, -1, null, 5, pt.X, pt.Y);
                     }
                     if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Green) && !tile.wire3())
@@ -29802,7 +30554,7 @@ namespace EternalLandPlugin.Game
                             return false;
                         }
                         wiresLeftToConsume--;
-                        WorldGen.PlaceWire3(pt.X, pt.Y);
+                        PlaceWire3(pt.X, pt.Y);
                         SendDataToPlayer(17, -1, -1, null, 12, pt.X, pt.Y);
                     }
                     if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Blue) && !tile.wire2())
@@ -29812,7 +30564,7 @@ namespace EternalLandPlugin.Game
                             return false;
                         }
                         wiresLeftToConsume--;
-                        WorldGen.PlaceWire2(pt.X, pt.Y);
+                        PlaceWire2(pt.X, pt.Y);
                         SendDataToPlayer(17, -1, -1, null, 10, pt.X, pt.Y);
                     }
                     if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Yellow) && !tile.wire4())
@@ -29838,23 +30590,23 @@ namespace EternalLandPlugin.Game
                 }
                 if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Cutter))
                 {
-                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Red) && tile.wire() && WorldGen.KillWire(pt.X, pt.Y))
+                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Red) && tile.wire() && KillWire(pt.X, pt.Y))
                     {
                         SendDataToPlayer(17, -1, -1, null, 6, pt.X, pt.Y);
                     }
-                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Green) && tile.wire3() && WorldGen.KillWire3(pt.X, pt.Y))
+                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Green) && tile.wire3() && KillWire3(pt.X, pt.Y))
                     {
                         SendDataToPlayer(17, -1, -1, null, 13, pt.X, pt.Y);
                     }
-                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Blue) && tile.wire2() && WorldGen.KillWire2(pt.X, pt.Y))
+                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Blue) && tile.wire2() && KillWire2(pt.X, pt.Y))
                     {
                         SendDataToPlayer(17, -1, -1, null, 11, pt.X, pt.Y);
                     }
-                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Yellow) && tile.wire4() && WorldGen.KillWire4(pt.X, pt.Y))
+                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Yellow) && tile.wire4() && KillWire4(pt.X, pt.Y))
                     {
                         SendDataToPlayer(17, -1, -1, null, 17, pt.X, pt.Y);
                     }
-                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Actuator) && tile.actuator() && WorldGen.KillActuator(pt.X, pt.Y))
+                    if (mode.HasFlag(WiresUI.Settings.MultiToolMode.Actuator) && tile.actuator() && KillActuator(pt.X, pt.Y))
                     {
                         SendDataToPlayer(17, -1, -1, null, 9, pt.X, pt.Y);
                     }
@@ -29862,6 +30614,1008 @@ namespace EternalLandPlugin.Game
                 return true;
             }
             #endregion
+            #region 流体
+            public const int maxLiquidBuffer = 50000;
+
+            public int maxLiquid = 25000;
+
+            public int skipCount;
+
+            public int stuckCount;
+
+            public int stuckAmount;
+
+            public int cycles = 10;
+
+            public int curMaxLiquid = 0;
+
+            public int numLiquid = 0;
+
+            public bool stuck;
+
+            public bool quickFall;
+
+            public bool quickSettle;
+
+            public int wetCounter;
+
+            public int panicCounter;
+
+            public bool panicMode;
+
+            public int panicY;
+
+            public int waterLine;
+
+            public HashSet<int> _netChangeSet = new HashSet<int>();
+
+            public HashSet<int> _swapNetChangeSet = new HashSet<int>();
+
+            public int numLiquidBuffer = 0;
+
+            public void NetSendLiquid(int x, int y)
+            {
+                if (!WorldGen.gen)
+                {
+                    lock (_netChangeSet)
+                    {
+                        _netChangeSet.Add(((x & 0xFFFF) << 16) | (y & 0xFFFF));
+                    }
+                }
+            }
+            public bool UnderGroundDesertCheck(int x, int y)
+            {
+                int num = 3;
+                for (int i = x - num; i <= x + num; i++)
+                {
+                    for (int j = y - num; j <= y + num; j++)
+                    {
+                        if (InWorld(i, j) && (this[i, j].wall == 187 || this[i, j].wall == 216))
+                        {
+                            return true;
+                        }
+                    }
+                }
+                return false;
+            }
+            public bool Setting_UseReducedMaxLiquids = true;
+            public void QuickWater(int verbose = 0, int minY = -1, int maxY = -1)
+            {
+                Main.tileSolid[379] = true;
+                tilesIgnoreWater(ignoreSolids: true);
+                if (minY == -1)
+                {
+                    minY = 3;
+                }
+                if (maxY == -1)
+                {
+                    maxY = MaxTilesY - 3;
+                }
+                for (int num = maxY; num >= minY; num--)
+                {
+                    //UpdateProgressDisplay(verbose, minY, maxY, num);
+                    for (int i = 4; i < MaxTilesX - 4; i++)
+                    {
+                        if (this[i, num].liquid != 0)
+                        {
+                            SettleWaterAt(i, num);
+                        }
+                    }
+                }
+                tilesIgnoreWater(ignoreSolids: false);
+            }
+            public void tilesIgnoreWater(bool ignoreSolids) => Terraria.Liquid.tilesIgnoreWater(ignoreSolids);
+            public void SettleWaterAt(int originX, int originY)
+            {
+                ITile tile = this[originX, originY];
+                tilesIgnoreWater(ignoreSolids: true);
+                if (tile.liquid == 0)
+                {
+                    return;
+                }
+                int num = originX;
+                int num2 = originY;
+                bool tileAtXYHasLava = tile.lava();
+                bool flag = tile.honey();
+                int num3 = tile.liquid;
+                byte b = tile.liquidType();
+                tile.liquid = 0;
+                bool flag2 = true;
+                while (true)
+                {
+                    ITile tile2 = this[num, num2 + 1];
+                    bool flag3 = false;
+                    while (num2 < MaxTilesY - 5 && tile2.liquid == 0 && (!tile2.nactive() || !Main.tileSolid[tile2.type] || Main.tileSolidTop[tile2.type]))
+                    {
+                        num2++;
+                        flag3 = true;
+                        flag2 = false;
+                        tile2 = this[num, num2 + 1];
+                    }
+                    if (flag3 && WorldGen.gen && !flag && num2 > waterLine)
+                    {
+                        b = 1;
+                    }
+                    int num4 = -1;
+                    int num5 = 0;
+                    int num6 = -1;
+                    int num7 = 0;
+                    bool flag4 = false;
+                    bool flag5 = false;
+                    bool flag6 = false;
+                    while (true)
+                    {
+                        if (this[num + num5 * num4, num2].liquid == 0)
+                        {
+                            num6 = num4;
+                            num7 = num5;
+                        }
+                        if (num4 == -1 && num + num5 * num4 < 5)
+                        {
+                            flag5 = true;
+                        }
+                        else if (num4 == 1 && num + num5 * num4 > MaxTilesX - 5)
+                        {
+                            flag4 = true;
+                        }
+                        tile2 = this[num + num5 * num4, num2 + 1];
+                        if (tile2.liquid != 0 && tile2.liquid != byte.MaxValue && tile2.liquidType() == b)
+                        {
+                            int num8 = 255 - tile2.liquid;
+                            if (num8 > num3)
+                            {
+                                num8 = num3;
+                            }
+                            tile2.liquid += (byte)num8;
+                            num3 -= num8;
+                            if (num3 == 0)
+                            {
+                                break;
+                            }
+                        }
+                        if (num2 < MaxTilesY - 5 && tile2.liquid == 0 && (!tile2.nactive() || !Main.tileSolid[tile2.type] || Main.tileSolidTop[tile2.type]))
+                        {
+                            flag6 = true;
+                            break;
+                        }
+                        ITile tile3 = this[num + (num5 + 1) * num4, num2];
+                        if ((tile3.liquid != 0 && (!flag2 || num4 != 1)) || (tile3.nactive() && Main.tileSolid[tile3.type] && !Main.tileSolidTop[tile3.type]))
+                        {
+                            if (num4 == 1)
+                            {
+                                flag4 = true;
+                            }
+                            else
+                            {
+                                flag5 = true;
+                            }
+                        }
+                        if (flag5 && flag4)
+                        {
+                            break;
+                        }
+                        if (flag4)
+                        {
+                            num4 = -1;
+                            num5++;
+                        }
+                        else if (flag5)
+                        {
+                            if (num4 == 1)
+                            {
+                                num5++;
+                            }
+                            num4 = 1;
+                        }
+                        else
+                        {
+                            if (num4 == 1)
+                            {
+                                num5++;
+                            }
+                            num4 = -num4;
+                        }
+                    }
+                    num += num7 * num6;
+                    if (num3 == 0 || !flag6)
+                    {
+                        break;
+                    }
+                    num2++;
+                }
+                this[num, num2].liquid = (byte)num3;
+                this[num, num2].liquidType(b);
+                if (this[num, num2].liquid > 0)
+                {
+                    AttemptToMoveLava(num, num2, tileAtXYHasLava);
+                    AttemptToMoveHoney(num, num2, flag);
+                }
+                tilesIgnoreWater(ignoreSolids: false);
+            }
+            public void AttemptToMoveHoney(int X, int Y, bool tileAtXYHasHoney)
+            {
+                if (this[X - 1, Y].liquid > 0 && this[X - 1, Y].honey() != tileAtXYHasHoney)
+                {
+                    if (tileAtXYHasHoney)
+                    {
+                        HoneyCheck(X, Y);
+                    }
+                    else
+                    {
+                        HoneyCheck(X - 1, Y);
+                    }
+                }
+                else if (this[X + 1, Y].liquid > 0 && this[X + 1, Y].honey() != tileAtXYHasHoney)
+                {
+                    if (tileAtXYHasHoney)
+                    {
+                        HoneyCheck(X, Y);
+                    }
+                    else
+                    {
+                        HoneyCheck(X + 1, Y);
+                    }
+                }
+                else if (this[X, Y - 1].liquid > 0 && this[X, Y - 1].honey() != tileAtXYHasHoney)
+                {
+                    if (tileAtXYHasHoney)
+                    {
+                        HoneyCheck(X, Y);
+                    }
+                    else
+                    {
+                        HoneyCheck(X, Y - 1);
+                    }
+                }
+                else if (this[X, Y + 1].liquid > 0 && this[X, Y + 1].honey() != tileAtXYHasHoney)
+                {
+                    if (tileAtXYHasHoney)
+                    {
+                        HoneyCheck(X, Y);
+                    }
+                    else
+                    {
+                        HoneyCheck(X, Y + 1);
+                    }
+                }
+            }
+
+            public void AttemptToMoveLava(int X, int Y, bool tileAtXYHasLava)
+            {
+                if (this[X - 1, Y].liquid > 0 && this[X - 1, Y].lava() != tileAtXYHasLava)
+                {
+                    if (tileAtXYHasLava)
+                    {
+                        LavaCheck(X, Y);
+                    }
+                    else
+                    {
+                        LavaCheck(X - 1, Y);
+                    }
+                }
+                else if (this[X + 1, Y].liquid > 0 && this[X + 1, Y].lava() != tileAtXYHasLava)
+                {
+                    if (tileAtXYHasLava)
+                    {
+                        LavaCheck(X, Y);
+                    }
+                    else
+                    {
+                        LavaCheck(X + 1, Y);
+                    }
+                }
+                else if (this[X, Y - 1].liquid > 0 && this[X, Y - 1].lava() != tileAtXYHasLava)
+                {
+                    if (tileAtXYHasLava)
+                    {
+                        LavaCheck(X, Y);
+                    }
+                    else
+                    {
+                        LavaCheck(X, Y - 1);
+                    }
+                }
+                else if (this[X, Y + 1].liquid > 0 && this[X, Y + 1].lava() != tileAtXYHasLava)
+                {
+                    if (tileAtXYHasLava)
+                    {
+                        LavaCheck(X, Y);
+                    }
+                    else
+                    {
+                        LavaCheck(X, Y + 1);
+                    }
+                }
+            }
+            public void AddBuffer(int x, int y)
+            {
+                if (numLiquidBuffer < 49998 && !this[x, y].checkingLiquid())
+                {
+                    this[x, y].checkingLiquid(checkingLiquid: true);
+                    LiquidBuffer[numLiquidBuffer].x = x;
+                    LiquidBuffer[numLiquidBuffer].y = y;
+                    numLiquidBuffer++;
+                }
+            }
+
+            public void DelBuffer(int l)
+            {
+                numLiquidBuffer--;
+                LiquidBuffer[l].x = LiquidBuffer[numLiquidBuffer].x;
+                LiquidBuffer[l].y = LiquidBuffer[numLiquidBuffer].y;
+            }
+            public void UpdateLiquid()
+            {
+                int num = 8;
+                tilesIgnoreWater(ignoreSolids: true);
+                if (Main.netMode == 2)
+                {
+                    int num2 = 0;
+                    for (int i = 0; i < 15; i++)
+                    {
+                        if (Main.player[i].active)
+                        {
+                            num2++;
+                        }
+                    }
+                    cycles = 10 + num2 / 3;
+                    curMaxLiquid = maxLiquid - num2 * 250;
+                    num = 10 + num2 / 3;
+                    if (Setting_UseReducedMaxLiquids)
+                    {
+                        curMaxLiquid = 5000;
+                    }
+                }
+                if (!panicMode)
+                {
+                    if ((double)numLiquidBuffer >= 45000.0)
+                    {
+                        panicCounter++;
+                        if (panicCounter > 3600)
+                        {
+                            StartPanic();
+                        }
+                    }
+                    else
+                    {
+                        panicCounter = 0;
+                    }
+                }
+                if (panicMode)
+                {
+                    int num3 = 0;
+                    while (panicY >= 3 && num3 < 5)
+                    {
+                        num3++;
+                        QuickWater(0, panicY, panicY);
+                        panicY--;
+                        if (panicY >= 3)
+                        {
+                            continue;
+                        }
+                        System.Console.WriteLine(Language.GetTextValue("Misc.WaterSettled"));
+                        panicCounter = 0;
+                        panicMode = false;
+                        WaterCheck();
+                        if (Main.netMode != 2)
+                        {
+                            continue;
+                        }
+                        /*for (int j = 0; j < 255; j++)
+                        {
+                            for (int k = 0; k < Main.maxSectionsX; k++)
+                            {
+                                for (int l = 0; l < Main.maxSectionsY; l++)
+                                {
+                                    Netplay.Clients[j].TileSections[k, l] = false;
+                                }
+                            }
+                        }*/
+                    }
+                    return;
+                }
+                bool flag = quickSettle;
+                if (Setting_UseReducedMaxLiquids)
+                {
+                    flag |= (numLiquid > 2000);
+                }
+                if (flag)
+                {
+                    quickFall = true;
+                }
+                else
+                {
+                    quickFall = false;
+                }
+                wetCounter++;
+                int num4 = curMaxLiquid / cycles;
+                int num5 = num4 * (wetCounter - 1);
+                int num6 = num4 * wetCounter;
+                if (wetCounter == cycles)
+                {
+                    num6 = numLiquid;
+                }
+                if (num6 > numLiquid)
+                {
+                    num6 = numLiquid;
+                    wetCounter = cycles;
+                }
+                if (quickFall)
+                {
+                    for (int m = num5; m < num6; m++)
+                    {
+                        Liquid[m].delay = 10;
+                        Liquid[m].Update(this);
+                        this[Liquid[m].x, Liquid[m].y].skipLiquid(skipLiquid: false);
+                    }
+                }
+                else
+                {
+                    for (int n = num5; n < num6; n++)
+                    {
+                        if (!this[Liquid[n].x, Liquid[n].y].skipLiquid())
+                        {
+                            Liquid[n].Update(this);
+                        }
+                        else
+                        {
+                            this[Liquid[n].x, Liquid[n].y].skipLiquid(skipLiquid: false);
+                        }
+                    }
+                }
+                if (wetCounter >= cycles)
+                {
+                    wetCounter = 0;
+                    for (int num7 = numLiquid - 1; num7 >= 0; num7--)
+                    {
+                        if (Liquid[num7].kill >= num)
+                        {
+                            if (this[Liquid[num7].x, Liquid[num7].y].liquid == 254)
+                            {
+                                this[Liquid[num7].x, Liquid[num7].y].liquid = byte.MaxValue;
+                            }
+                            DelWater(num7);
+                        }
+                    }
+                    int num8 = curMaxLiquid - (curMaxLiquid - numLiquid);
+                    if (num8 > numLiquidBuffer)
+                    {
+                        num8 = numLiquidBuffer;
+                    }
+                    for (int num9 = 0; num9 < num8; num9++)
+                    {
+                        this[LiquidBuffer[0].x, LiquidBuffer[0].y].checkingLiquid(checkingLiquid: false);
+                        AddWater(LiquidBuffer[0].x, LiquidBuffer[0].y);
+                        DelBuffer(0);
+                    }
+                    if (numLiquid > 0 && numLiquid > stuckAmount - 50 && numLiquid < stuckAmount + 50)
+                    {
+                        stuckCount++;
+                        if (stuckCount >= 10000)
+                        {
+                            stuck = true;
+                            for (int num10 = numLiquid - 1; num10 >= 0; num10--)
+                            {
+                                DelWater(num10);
+                            }
+                            stuck = false;
+                            stuckCount = 0;
+                        }
+                    }
+                    else
+                    {
+                        stuckCount = 0;
+                        stuckAmount = numLiquid;
+                    }
+                }
+                if (!WorldGen.gen && Main.netMode == 2 && _netChangeSet.Count > 0)
+                {
+                    Terraria.Utils.Swap(ref _netChangeSet, ref _swapNetChangeSet);
+                    Terraria.GameContent.NetModules.NetLiquidModule.CreateAndBroadcastByChunk(_swapNetChangeSet);
+                    _swapNetChangeSet.Clear();
+                }
+                tilesIgnoreWater(ignoreSolids: false);
+            }
+            public void WaterCheck()
+            {
+                tilesIgnoreWater(ignoreSolids: true);
+                numLiquid = 0;
+                numLiquidBuffer = 0;
+                for (int i = 1; i < Main.maxTilesX - 1; i++)
+                {
+                    for (int num = Main.maxTilesY - 2; num > 0; num--)
+                    {
+                        ITile tile = this[i, num];
+                        tile.checkingLiquid(checkingLiquid: false);
+                        if (tile.liquid > 0 && tile.nactive() && Main.tileSolid[tile.type] && !Main.tileSolidTop[tile.type])
+                        {
+                            tile.liquid = 0;
+                        }
+                        else if (tile.liquid > 0)
+                        {
+                            if (tile.active())
+                            {
+                                if (tile.lava())
+                                {
+                                    if (TileObjectData.CheckLavaDeath(tile))
+                                    {
+                                        KillTile(i, num);
+                                    }
+                                }
+                                else if (TileObjectData.CheckWaterDeath(tile))
+                                {
+                                    KillTile(i, num);
+                                }
+                            }
+                            ITile tile2 = this[i, num + 1];
+                            if ((!tile2.nactive() || !Main.tileSolid[tile2.type] || Main.tileSolidTop[tile2.type]) && tile2.liquid < byte.MaxValue)
+                            {
+                                if (tile2.liquid > 250)
+                                {
+                                    tile2.liquid = byte.MaxValue;
+                                }
+                                else
+                                {
+                                    AddWater(i, num);
+                                }
+                            }
+                            ITile tile3 = this[i - 1, num];
+                            ITile tile4 = this[i + 1, num];
+                            if ((!tile3.nactive() || !Main.tileSolid[tile3.type] || Main.tileSolidTop[tile3.type]) && tile3.liquid != tile.liquid)
+                            {
+                                AddWater(i, num);
+                            }
+                            else if ((!tile4.nactive() || !Main.tileSolid[tile4.type] || Main.tileSolidTop[tile4.type]) && tile4.liquid != tile.liquid)
+                            {
+                                AddWater(i, num);
+                            }
+                            if (tile.lava())
+                            {
+                                if (tile3.liquid > 0 && !tile3.lava())
+                                {
+                                    AddWater(i, num);
+                                }
+                                else if (tile4.liquid > 0 && !tile4.lava())
+                                {
+                                    AddWater(i, num);
+                                }
+                                else if (this[i, num - 1].liquid > 0 && !this[i, num - 1].lava())
+                                {
+                                    AddWater(i, num);
+                                }
+                                else if (tile2.liquid > 0 && !tile2.lava())
+                                {
+                                    AddWater(i, num);
+                                }
+                            }
+                        }
+                    }
+                }
+                tilesIgnoreWater(ignoreSolids: false);
+            }
+            public void AddWater(int x, int y)
+            {
+                ITile tile = this[x, y];
+                if (this[x, y] == null || tile.checkingLiquid() || x >= MaxTilesX - 5 || y >= MaxTilesY - 5 || x < 5 || y < 5 || tile.liquid == 0 || (tile.nactive() && Main.tileSolid[tile.type] && tile.type != 546 && !Main.tileSolidTop[tile.type]))
+                {
+                    return;
+                }
+                if (numLiquid >= curMaxLiquid - 1)
+                {
+                    AddBuffer(x, y);
+                    return;
+                }
+                tile.checkingLiquid(checkingLiquid: true);
+                tile.skipLiquid(skipLiquid: false);
+                Liquid[numLiquid].kill = 0;
+                Liquid[numLiquid].x = x;
+                Liquid[numLiquid].y = y;
+                Liquid[numLiquid].delay = 0;
+                numLiquid++;
+                NetSendLiquid(x, y);
+                if (!tile.active() || WorldGen.gen)
+                {
+                    return;
+                }
+                bool flag = false;
+                if (tile.lava())
+                {
+                    if (TileObjectData.CheckLavaDeath(tile))
+                    {
+                        flag = true;
+                    }
+                }
+                else if (TileObjectData.CheckWaterDeath(tile))
+                {
+                    flag = true;
+                }
+                if (flag)
+                {
+                    KillTile(x, y);
+                    if (Main.netMode == 2)
+                    {
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
+                    }
+                }
+            }
+            public void DelWater(int l)
+            {
+                int num = Liquid[l].x;
+                int num2 = Liquid[l].y;
+                ITile tile = this[num - 1, num2];
+                ITile tile2 = this[num + 1, num2];
+                ITile tile3 = this[num, num2 + 1];
+                ITile tile4 = this[num, num2];
+                byte b = 2;
+                if (tile4.liquid < b)
+                {
+                    tile4.liquid = 0;
+                    if (tile.liquid < b)
+                    {
+                        tile.liquid = 0;
+                    }
+                    else
+                    {
+                        AddWater(num - 1, num2);
+                    }
+                    if (tile2.liquid < b)
+                    {
+                        tile2.liquid = 0;
+                    }
+                    else
+                    {
+                        AddWater(num + 1, num2);
+                    }
+                }
+                else if (tile4.liquid < 20)
+                {
+                    if ((tile.liquid < tile4.liquid && (!tile.nactive() || !Main.tileSolid[tile.type] || Main.tileSolidTop[tile.type])) || (tile2.liquid < tile4.liquid && (!tile2.nactive() || !Main.tileSolid[tile2.type] || Main.tileSolidTop[tile2.type])) || (tile3.liquid < byte.MaxValue && (!tile3.nactive() || !Main.tileSolid[tile3.type] || Main.tileSolidTop[tile3.type])))
+                    {
+                        tile4.liquid = 0;
+                    }
+                }
+                else if (tile3.liquid < byte.MaxValue && (!tile3.nactive() || !Main.tileSolid[tile3.type] || Main.tileSolidTop[tile3.type]) && !stuck && (!this[num, num2].nactive() || !Main.tileSolid[this[num, num2].type] || Main.tileSolidTop[this[num, num2].type]))
+                {
+                    Liquid[l].kill = 0;
+                    return;
+                }
+                if (tile4.liquid < 250 && this[num, num2 - 1].liquid > 0)
+                {
+                    AddWater(num, num2 - 1);
+                }
+                if (tile4.liquid == 0)
+                {
+                    tile4.liquidType(0);
+                }
+                else
+                {
+                    if (tile2.liquid > 0 && tile2.liquid < 250 && (!tile2.nactive() || !Main.tileSolid[tile2.type] || Main.tileSolidTop[tile2.type]) && tile4.liquid != tile2.liquid)
+                    {
+                        AddWater(num + 1, num2);
+                    }
+                    if (tile.liquid > 0 && tile.liquid < 250 && (!tile.nactive() || !Main.tileSolid[tile.type] || Main.tileSolidTop[tile.type]) && tile4.liquid != tile.liquid)
+                    {
+                        AddWater(num - 1, num2);
+                    }
+                    if (tile4.lava())
+                    {
+                        LavaCheck(num, num2);
+                        for (int i = num - 1; i <= num + 1; i++)
+                        {
+                            for (int j = num2 - 1; j <= num2 + 1; j++)
+                            {
+                                ITile tile5 = this[i, j];
+                                if (!tile5.active())
+                                {
+                                    continue;
+                                }
+                                if (tile5.type == 2 || tile5.type == 23 || tile5.type == 109 || tile5.type == 199 || tile5.type == 477 || tile5.type == 492)
+                                {
+                                    tile5.type = 0;
+                                    WorldGen.SquareTileFrame(i, j);
+                                    if (Main.netMode == 2)
+                                    {
+                                        NetMessage.SendTileSquare(-1, num, num2, 3);
+                                    }
+                                }
+                                else if (tile5.type == 60 || tile5.type == 70)
+                                {
+                                    tile5.type = 59;
+                                    WorldGen.SquareTileFrame(i, j);
+                                    if (Main.netMode == 2)
+                                    {
+                                        NetMessage.SendTileSquare(-1, num, num2, 3);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    else if (tile4.honey())
+                    {
+                        HoneyCheck(num, num2);
+                    }
+                }
+                if (Main.netMode == 2)
+                {
+                    NetSendLiquid(num, num2);
+                }
+                numLiquid--;
+                this[Liquid[l].x, Liquid[l].y].checkingLiquid(checkingLiquid: false);
+                Liquid[l].x = Liquid[numLiquid].x;
+                Liquid[l].y = Liquid[numLiquid].y;
+                Liquid[l].kill = Liquid[numLiquid].kill;
+                if (Main.tileAlch[tile4.type])
+                {
+                    CheckAlch(num, num2);
+                }
+                else if (tile4.type == 518)
+                {
+                    if (quickFall)
+                    {
+                        CheckLilyPad(num, num2);
+                    }
+                    else if (this[num, num2 + 1].liquid < byte.MaxValue || this[num, num2 - 1].liquid > 0)
+                    {
+                        SquareTileFrame(num, num2);
+                    }
+                    else
+                    {
+                        CheckLilyPad(num, num2);
+                    }
+                }
+            }
+            public void LavaCheck(int x, int y)
+            {
+                if (WorldGen.generatingWorld && UnderGroundDesertCheck(x, y))
+                {
+                    for (int i = x - 3; i <= x + 3; i++)
+                    {
+                        for (int j = y - 3; j <= y + 3; j++)
+                        {
+                            this[i, j].lava(lava: true);
+                        }
+                    }
+                }
+                if (SolidTile(x, y))
+                {
+                    return;
+                }
+                ITile tile = this[x - 1, y];
+                ITile tile2 = this[x + 1, y];
+                ITile tile3 = this[x, y - 1];
+                ITile tile4 = this[x, y + 1];
+                ITile tile5 = this[x, y];
+                if ((tile.liquid > 0 && !tile.lava()) || (tile2.liquid > 0 && !tile2.lava()) || (tile3.liquid > 0 && !tile3.lava()))
+                {
+                    int num = 0;
+                    int num2 = 56;
+                    if (!tile.lava())
+                    {
+                        num += tile.liquid;
+                        tile.liquid = 0;
+                    }
+                    if (!tile2.lava())
+                    {
+                        num += tile2.liquid;
+                        tile2.liquid = 0;
+                    }
+                    if (!tile3.lava())
+                    {
+                        num += tile3.liquid;
+                        tile3.liquid = 0;
+                    }
+                    if (tile.honey() || tile2.honey() || tile3.honey())
+                    {
+                        num2 = 230;
+                    }
+                    if (num < 24)
+                    {
+                        return;
+                    }
+                    if (tile5.active() && Main.tileObsidianKill[tile5.type])
+                    {
+                        KillTile(x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
+
+                    }
+                    if (WorldGen.getGoodWorldGen)
+                    {
+                        if (!tile.lava() && !tile2.lava() && !tile3.lava())
+                        {
+                            tile5.lava(lava: false);
+                        }
+                        else
+                        {
+                            tile5.lava(lava: true);
+                        }
+                    }
+                    else
+                    {
+                        if (tile5.active())
+                        {
+                            return;
+                        }
+                        tile5.liquid = 0;
+                        tile5.lava(lava: false);
+                        PlaceTile(x, y, num2, mute: true, forced: true);
+                        SquareTileFrame(x, y);
+                        SendTileSquare(-1, x - 1, y - 1, 3, (num2 == 56) ? TileChangeType.LavaWater : TileChangeType.HoneyLava);
+
+                    }
+                }
+                else
+                {
+                    if (tile4.liquid <= 0 || tile4.lava())
+                    {
+                        return;
+                    }
+                    bool flag = false;
+                    if (tile5.active() && TileID.Sets.IsAContainer[tile5.type] && !TileID.Sets.IsAContainer[tile4.type])
+                    {
+                        flag = true;
+                    }
+                    if (Main.tileCut[tile4.type])
+                    {
+                        KillTile(x, y + 1);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y + 1);
+
+                    }
+                    else if (tile4.active() && Main.tileObsidianKill[tile4.type])
+                    {
+                        KillTile(x, y + 1);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y + 1);
+
+                    }
+                    if (!(!tile4.active() || flag))
+                    {
+                        return;
+                    }
+                    if (tile5.liquid < 24)
+                    {
+                        tile5.liquid = 0;
+                        tile5.liquidType(0);
+                        SendTileSquare(-1, x - 1, y, 3);
+
+                        return;
+                    }
+                    if (WorldGen.getGoodWorldGen)
+                    {
+                        if (!tile4.lava())
+                        {
+                            tile5.lava(lava: false);
+                        }
+                        else
+                        {
+                            tile5.lava(lava: true);
+                        }
+                        return;
+                    }
+                    int num3 = 56;
+                    if (tile4.honey())
+                    {
+                        num3 = 230;
+                    }
+                    tile5.liquid = 0;
+                    tile5.lava(lava: false);
+                    tile4.liquid = 0;
+                    PlaceTile(x, y + 1, num3, mute: true, forced: true);
+                    SquareTileFrame(x, y + 1);
+                    SendTileSquare(-1, x - 1, y, 3, (num3 == 56) ? TileChangeType.LavaWater : TileChangeType.HoneyLava);
+
+                }
+            }
+            public void HoneyCheck(int x, int y)
+            {
+                if (SolidTile(x, y))
+                {
+                    return;
+                }
+                ITile tile = this[x - 1, y];
+                ITile tile2 = this[x + 1, y];
+                ITile tile3 = this[x, y - 1];
+                ITile tile4 = this[x, y + 1];
+                ITile tile5 = this[x, y];
+                bool flag = false;
+                if ((tile.liquid > 0 && tile.liquidType() == 0) || (tile2.liquid > 0 && tile2.liquidType() == 0) || (tile3.liquid > 0 && tile3.liquidType() == 0))
+                {
+                    int num = 0;
+                    if (tile.liquidType() == 0)
+                    {
+                        num += tile.liquid;
+                        tile.liquid = 0;
+                    }
+                    if (tile2.liquidType() == 0)
+                    {
+                        num += tile2.liquid;
+                        tile2.liquid = 0;
+                    }
+                    if (tile3.liquidType() == 0)
+                    {
+                        num += tile3.liquid;
+                        tile3.liquid = 0;
+                    }
+                    if (tile.lava() || tile2.lava() || tile3.lava())
+                    {
+                        flag = true;
+                    }
+                    if (num < 32)
+                    {
+                        return;
+                    }
+                    if (tile5.active() && Main.tileObsidianKill[tile5.type])
+                    {
+                        KillTile(x, y);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y);
+                    }
+                    if (!tile5.active())
+                    {
+                        tile5.liquid = 0;
+                        tile5.liquidType(0);
+                        PlaceTile(x, y, 229, mute: true, forced: true);
+                        SquareTileFrame(x, y);
+                        SendTileSquare(-1, x - 1, y - 1, 3, flag ? TileChangeType.HoneyLava : TileChangeType.HoneyWater);
+                    }
+                }
+                else
+                {
+                    if (tile4.liquid <= 0 || tile4.liquidType() != 0)
+                    {
+                        return;
+                    }
+                    if (Main.tileCut[tile4.type])
+                    {
+                        KillTile(x, y + 1);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y + 1);
+
+                    }
+                    else if (tile4.active() && Main.tileObsidianKill[tile4.type])
+                    {
+                        KillTile(x, y + 1);
+                        SendDataToPlayer(17, -1, -1, null, 0, x, y + 1);
+
+                    }
+                    if (tile4.active())
+                    {
+                        return;
+                    }
+                    if (tile5.liquid < 32)
+                    {
+                        tile5.liquid = 0;
+                        tile5.liquidType(0);
+                        SendTileSquare(-1, x - 1, y, 3);
+
+                        return;
+                    }
+                    if (tile4.lava())
+                    {
+                        flag = true;
+                    }
+                    tile5.liquid = 0;
+                    tile5.liquidType(0);
+                    tile4.liquid = 0;
+                    tile4.liquidType(0);
+                    PlaceTile(x, y + 1, 229, mute: true, forced: true);
+                    SquareTileFrame(x, y + 1);
+                    SendTileSquare(-1, x - 1, y, 3, flag ? TileChangeType.HoneyLava : TileChangeType.HoneyWater);
+
+                }
+            }
+            public void StartPanic()
+            {
+                if (!panicMode)
+                {
+                    waterLine = MaxTilesY;
+                    numLiquid = 0;
+                    numLiquidBuffer = 0;
+                    panicCounter = 0;
+                    panicMode = true;
+                    panicY = MaxTilesY - 3;
+                    if (Main.dedServ)
+                    {
+                        System.Console.WriteLine(Language.GetTextValue("Misc.ForceWaterSettling"));
+                    }
+                }
+            }
             #endregion
         }
         public static bool GetMapFromUUID(Guid uuid, out MapData data)
@@ -29877,11 +31631,12 @@ namespace EternalLandPlugin.Game
             data = new MapData();
             return false;
         }
-        public static Guid CreateMultiPlayerMap(string name, int x = -1, int y = -1)
+        public async static Task<Guid> CreateMultiPlayerMap(string name, int x = -1, int y = -1)
         {
             if (GameData.Map.ContainsKey(name))
             {
-                var data = GameData.Map[name].Clone();
+                var data = GameData.GetMapData(name);
+                if (data == null) return Guid.Empty;
                 return CreateMultiPlayerMap(data, x, y);
             }
             else
@@ -29894,6 +31649,7 @@ namespace EternalLandPlugin.Game
             data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
             data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
             var uuid = Guid.NewGuid();
+            data.UUID = uuid;
             GameData.ActiveMap.Add(uuid, data);
             return uuid;
         }
@@ -29919,6 +31675,7 @@ namespace EternalLandPlugin.Game
                     {
                         map.Value.Dispose();
                         check.Remove(map.Key);
+                        GameData.ActiveMap[map.Key] = null;
                         GameData.ActiveMap.Remove(map.Key);
                         restartnow = true;
                         Utils.Broadcast($"世界 {map.Key} 已销毁.");
@@ -29933,13 +31690,13 @@ namespace EternalLandPlugin.Game
         }
         public static void SendProjectile(EPlayer eplr)
         {
-            if (eplr.GameInfo.IsInAnotherWorld)
+            if (eplr.IsInAnotherWorld)
             {
-                Main.projectile.Where(p => p.active && eplr.GameInfo.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
+                Main.projectile.Where(p => p.active && eplr.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
             }
             else
             {
-                Main.projectile.Where(p => p.active && eplr.GameInfo.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
+                Main.projectile.Where(p => p.active && eplr.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
             }
         }
         public static void SendMap(EPlayer eplr, MapData data, int x, int y)
@@ -29958,7 +31715,17 @@ namespace EternalLandPlugin.Game
             short sectionY2 = (short)Netplay.GetSectionY(StartY + height - 1);
             eplr.SendRawData(new RawDataWriter().SetType(PacketTypes.TileFrameSection).PackInt16(sectionX).PackInt16(sectionY).PackInt16(sectionX2).PackInt16(sectionY2).GetByteData());
         }
-
+        public static void UpdateMap()
+        {
+            try
+            {
+                GameData.ActiveMap.Values.ForEach(map =>
+                {
+                    //map.UpdateLiquid();
+                });
+            }
+            catch { }
+        }
         #region 一堆地图操作函数
         public static void ChangeWorldInfo(EPlayer eplr, bool toorigin = false)
         {
@@ -29979,7 +31746,6 @@ namespace EternalLandPlugin.Game
             }
             eplr.SendRawData(array);
         }
-
         static void WorldInfo(BinaryWriter binaryWriter, bool toorigin = false)
         {
             binaryWriter.Write((int)Main.time);
@@ -30167,9 +31933,6 @@ namespace EternalLandPlugin.Game
                     using (DeflateStream deflateStream = new DeflateStream(memoryStream2, CompressionMode.Compress, leaveOpen: true))
                     {
                         memoryStream.CopyTo(deflateStream);
-                        deflateStream.Flush();
-                        deflateStream.Close();
-                        deflateStream.Dispose();
                     }
                     if (memoryStream.Length <= memoryStream2.Length)
                     {
@@ -30573,41 +32336,653 @@ namespace EternalLandPlugin.Game
         }
         #endregion
     }
-    class MapTools
+    public class MapTools
     {
+        [MessagePackObject]
+        [Serializable]
+        public class Chest
+        {
+            [Key(0)]
+            public const float chestStackRange = 250f;
+            [Key(1)]
+            public const int maxChestTypes = 52;
+            [Key(2)]
+            public const int maxItems = 40;
+            [Key(3)]
+            public const int MaxNameLength = 20;
+            [Key(4)]
+            public EItem[] item;
+            [Key(5)]
+            public int x;
+            [Key(6)]
+            public int y;
+            [Key(7)]
+            public bool bankChest;
+            [Key(8)]
+            public string name;
+            [Key(9)]
+            public int frameCounter;
+            [Key(10)]
+            public int frame;
+            [Key(11)]
+            public HashSet<int> _chestInUse = new HashSet<int>();
+
+            public Chest(bool bank)
+            {
+                item = new EItem[40];
+                bankChest = bank;
+                name = string.Empty;
+            }
+            [SerializationConstructorAttribute]
+            public Chest()
+            {
+                item = new EItem[40];
+                bankChest = false;
+                name = string.Empty;
+            }
+
+            public override string ToString()
+            {
+                int num = 0;
+                for (int i = 0; i < item.Length; i++)
+                {
+                    if (((Item)item[i]).stack > 0)
+                    {
+                        num++;
+                    }
+                }
+                return $"{{X: {x}, Y: {y}, Count: {num}}}";
+            }
+            public static implicit operator Chest(Terraria.Chest v)
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    BinaryFormatter formatter = new BinaryFormatter();
+                    formatter.Serialize(stream, v);
+                    stream.Position = 0;
+                    return formatter.Deserialize(stream) as Chest;
+                }
+            }
+
+            public static implicit operator Terraria.Chest(Chest v)
+            {
+                using (MemoryStream stream = new MemoryStream())
+                {
+                    BinaryFormatter formatter = new BinaryFormatter();
+                    formatter.Serialize(stream, v);
+                    stream.Position = 0;
+                    return formatter.Deserialize(stream) as Terraria.Chest;
+                }
+            }
+
+        }
+        [MessagePackObject]
+        public class Liquid
+        {
+            [Key(0)]
+            public int x;
+            [Key(1)]
+            public int y;
+            [Key(2)]
+            public int kill;
+            [Key(3)]
+            public int delay;
+            [Key(4)]
+            public static HashSet<int> _netChangeSet = new HashSet<int>();
+            [Key(5)]
+            public static HashSet<int> _swapNetChangeSet = new HashSet<int>();
+            public void Update(MapManager.MapData map)
+            {
+                Main.tileSolid[379] = true;
+                ITile tile = map[x - 1, y];
+                ITile tile2 = map[x + 1, y];
+                ITile tile3 = map[x, y - 1];
+                ITile tile4 = map[x, y + 1];
+                ITile tile5 = map[x, y];
+                if (tile5.nactive() && Main.tileSolid[tile5.type] && !Main.tileSolidTop[tile5.type])
+                {
+                    _ = tile5.type;
+                    _ = 10;
+                    kill = 999;
+                    return;
+                }
+                byte liquid = tile5.liquid;
+                float num = 0f;
+                if (y > Main.UnderworldLayer && tile5.liquidType() == 0 && tile5.liquid > 0)
+                {
+                    byte b = 2;
+                    if (tile5.liquid < b)
+                    {
+                        b = tile5.liquid;
+                    }
+                    tile5.liquid -= b;
+                }
+                if (tile5.liquid == 0)
+                {
+                    kill = 999;
+                    return;
+                }
+                if (tile5.lava())
+                {
+                    map.LavaCheck(x, y);
+                    if (!map.quickFall)
+                    {
+                        if (delay < 5)
+                        {
+                            delay++;
+                            return;
+                        }
+                        delay = 0;
+                    }
+                }
+                else
+                {
+                    if (tile.lava())
+                    {
+                        map.AddWater(x - 1, y);
+                    }
+                    if (tile2.lava())
+                    {
+                        map.AddWater(x + 1, y);
+                    }
+                    if (tile3.lava())
+                    {
+                        map.AddWater(x, y - 1);
+                    }
+                    if (tile4.lava())
+                    {
+                        map.AddWater(x, y + 1);
+                    }
+                    if (tile5.honey())
+                    {
+                        map.HoneyCheck(x, y);
+                        if (!map.quickFall)
+                        {
+                            if (delay < 10)
+                            {
+                                delay++;
+                                return;
+                            }
+                            delay = 0;
+                        }
+                    }
+                    else
+                    {
+                        if (tile.honey())
+                        {
+                            map.AddWater(x - 1, y);
+                        }
+                        if (tile2.honey())
+                        {
+                            map.AddWater(x + 1, y);
+                        }
+                        if (tile3.honey())
+                        {
+                            map.AddWater(x, y - 1);
+                        }
+                        if (tile4.honey())
+                        {
+                            map.AddWater(x, y + 1);
+                        }
+                    }
+                }
+                if ((!tile4.nactive() || !Main.tileSolid[tile4.type] || Main.tileSolidTop[tile4.type]) && (tile4.liquid <= 0 || tile4.liquidType() == tile5.liquidType()) && tile4.liquid < byte.MaxValue)
+                {
+                    bool flag = false;
+                    num = 255 - tile4.liquid;
+                    if (num > (float)(int)tile5.liquid)
+                    {
+                        num = (int)tile5.liquid;
+                    }
+                    if (num == 1f && tile5.liquid == byte.MaxValue)
+                    {
+                        flag = true;
+                    }
+                    if (!flag)
+                    {
+                        tile5.liquid -= (byte)num;
+                    }
+                    tile4.liquid += (byte)num;
+                    tile4.liquidType(tile5.liquidType());
+                    map.AddWater(x, y + 1);
+                    tile4.skipLiquid(skipLiquid: true);
+                    tile5.skipLiquid(skipLiquid: true);
+                    if (map.quickSettle && tile5.liquid > 250)
+                    {
+                        tile5.liquid = byte.MaxValue;
+                    }
+                    else if (!flag)
+                    {
+                        map.AddWater(x - 1, y);
+                        map.AddWater(x + 1, y);
+                    }
+                }
+                if (tile5.liquid > 0)
+                {
+                    bool flag2 = true;
+                    bool flag3 = true;
+                    bool flag4 = true;
+                    bool flag5 = true;
+                    if (tile.nactive() && Main.tileSolid[tile.type] && !Main.tileSolidTop[tile.type])
+                    {
+                        flag2 = false;
+                    }
+                    else if (tile.liquid > 0 && tile.liquidType() != tile5.liquidType())
+                    {
+                        flag2 = false;
+                    }
+                    else if (map[x - 2, y].nactive() && Main.tileSolid[map[x - 2, y].type] && !Main.tileSolidTop[map[x - 2, y].type])
+                    {
+                        flag4 = false;
+                    }
+                    else if (map[x - 2, y].liquid == 0)
+                    {
+                        flag4 = false;
+                    }
+                    else if (map[x - 2, y].liquid > 0 && map[x - 2, y].liquidType() != tile5.liquidType())
+                    {
+                        flag4 = false;
+                    }
+                    if (tile2.nactive() && Main.tileSolid[tile2.type] && !Main.tileSolidTop[tile2.type])
+                    {
+                        flag3 = false;
+                    }
+                    else if (tile2.liquid > 0 && tile2.liquidType() != tile5.liquidType())
+                    {
+                        flag3 = false;
+                    }
+                    else if (map[x + 2, y].nactive() && Main.tileSolid[map[x + 2, y].type] && !Main.tileSolidTop[map[x + 2, y].type])
+                    {
+                        flag5 = false;
+                    }
+                    else if (map[x + 2, y].liquid == 0)
+                    {
+                        flag5 = false;
+                    }
+                    else if (map[x + 2, y].liquid > 0 && map[x + 2, y].liquidType() != tile5.liquidType())
+                    {
+                        flag5 = false;
+                    }
+                    int num2 = 0;
+                    if (tile5.liquid < 3)
+                    {
+                        num2 = -1;
+                    }
+                    if (tile5.liquid > 250)
+                    {
+                        flag4 = false;
+                        flag5 = false;
+                    }
+                    if (flag2 && flag3)
+                    {
+                        if (flag4 && flag5)
+                        {
+                            bool flag6 = true;
+                            bool flag7 = true;
+                            if (map[x - 3, y].nactive() && Main.tileSolid[map[x - 3, y].type] && !Main.tileSolidTop[map[x - 3, y].type])
+                            {
+                                flag6 = false;
+                            }
+                            else if (map[x - 3, y].liquid == 0)
+                            {
+                                flag6 = false;
+                            }
+                            else if (map[x - 3, y].liquidType() != tile5.liquidType())
+                            {
+                                flag6 = false;
+                            }
+                            if (map[x + 3, y].nactive() && Main.tileSolid[map[x + 3, y].type] && !Main.tileSolidTop[map[x + 3, y].type])
+                            {
+                                flag7 = false;
+                            }
+                            else if (map[x + 3, y].liquid == 0)
+                            {
+                                flag7 = false;
+                            }
+                            else if (map[x + 3, y].liquidType() != tile5.liquidType())
+                            {
+                                flag7 = false;
+                            }
+                            if (flag6 && flag7)
+                            {
+                                num = tile.liquid + tile2.liquid + map[x - 2, y].liquid + map[x + 2, y].liquid + map[x - 3, y].liquid + map[x + 3, y].liquid + tile5.liquid + num2;
+                                num = (float)Math.Round(num / 7f);
+                                int num3 = 0;
+                                tile.liquidType(tile5.liquidType());
+                                if (tile.liquid != (byte)num)
+                                {
+                                    tile.liquid = (byte)num;
+                                    map.AddWater(x - 1, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                tile2.liquidType(tile5.liquidType());
+                                if (tile2.liquid != (byte)num)
+                                {
+                                    tile2.liquid = (byte)num;
+                                    map.AddWater(x + 1, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                map[x - 2, y].liquidType(tile5.liquidType());
+                                if (map[x - 2, y].liquid != (byte)num)
+                                {
+                                    map[x - 2, y].liquid = (byte)num;
+                                    map.AddWater(x - 2, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                map[x + 2, y].liquidType(tile5.liquidType());
+                                if (map[x + 2, y].liquid != (byte)num)
+                                {
+                                    map[x + 2, y].liquid = (byte)num;
+                                    map.AddWater(x + 2, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                map[x - 3, y].liquidType(tile5.liquidType());
+                                if (map[x - 3, y].liquid != (byte)num)
+                                {
+                                    map[x - 3, y].liquid = (byte)num;
+                                    map.AddWater(x - 3, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                map[x + 3, y].liquidType(tile5.liquidType());
+                                if (map[x + 3, y].liquid != (byte)num)
+                                {
+                                    map[x + 3, y].liquid = (byte)num;
+                                    map.AddWater(x + 3, y);
+                                }
+                                else
+                                {
+                                    num3++;
+                                }
+                                if (tile.liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x - 1, y);
+                                }
+                                if (tile2.liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x + 1, y);
+                                }
+                                if (map[x - 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x - 2, y);
+                                }
+                                if (map[x + 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x + 2, y);
+                                }
+                                if (map[x - 3, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x - 3, y);
+                                }
+                                if (map[x + 3, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x + 3, y);
+                                }
+                                if (num3 != 6 || tile3.liquid <= 0)
+                                {
+                                    tile5.liquid = (byte)num;
+                                }
+                            }
+                            else
+                            {
+                                int num4 = 0;
+                                num = tile.liquid + tile2.liquid + map[x - 2, y].liquid + map[x + 2, y].liquid + tile5.liquid + num2;
+                                num = (float)Math.Round(num / 5f);
+                                tile.liquidType(tile5.liquidType());
+                                if (tile.liquid != (byte)num)
+                                {
+                                    tile.liquid = (byte)num;
+                                    map.AddWater(x - 1, y);
+                                }
+                                else
+                                {
+                                    num4++;
+                                }
+                                tile2.liquidType(tile5.liquidType());
+                                if (tile2.liquid != (byte)num)
+                                {
+                                    tile2.liquid = (byte)num;
+                                    map.AddWater(x + 1, y);
+                                }
+                                else
+                                {
+                                    num4++;
+                                }
+                                map[x - 2, y].liquidType(tile5.liquidType());
+                                if (map[x - 2, y].liquid != (byte)num)
+                                {
+                                    map[x - 2, y].liquid = (byte)num;
+                                    map.AddWater(x - 2, y);
+                                }
+                                else
+                                {
+                                    num4++;
+                                }
+                                map[x + 2, y].liquidType(tile5.liquidType());
+                                if (map[x + 2, y].liquid != (byte)num)
+                                {
+                                    map[x + 2, y].liquid = (byte)num;
+                                    map.AddWater(x + 2, y);
+                                }
+                                else
+                                {
+                                    num4++;
+                                }
+                                if (tile.liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x - 1, y);
+                                }
+                                if (tile2.liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x + 1, y);
+                                }
+                                if (map[x - 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x - 2, y);
+                                }
+                                if (map[x + 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                                {
+                                    map.AddWater(x + 2, y);
+                                }
+                                if (num4 != 4 || tile3.liquid <= 0)
+                                {
+                                    tile5.liquid = (byte)num;
+                                }
+                            }
+                        }
+                        else if (flag4)
+                        {
+                            num = tile.liquid + tile2.liquid + map[x - 2, y].liquid + tile5.liquid + num2;
+                            num = (float)Math.Round(num / 4f);
+                            tile.liquidType(tile5.liquidType());
+                            if (tile.liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                tile.liquid = (byte)num;
+                                map.AddWater(x - 1, y);
+                            }
+                            tile2.liquidType(tile5.liquidType());
+                            if (tile2.liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                tile2.liquid = (byte)num;
+                                map.AddWater(x + 1, y);
+                            }
+                            map[x - 2, y].liquidType(tile5.liquidType());
+                            if (map[x - 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                map[x - 2, y].liquid = (byte)num;
+                                map.AddWater(x - 2, y);
+                            }
+                            tile5.liquid = (byte)num;
+                        }
+                        else if (flag5)
+                        {
+                            num = tile.liquid + tile2.liquid + map[x + 2, y].liquid + tile5.liquid + num2;
+                            num = (float)Math.Round(num / 4f);
+                            tile.liquidType(tile5.liquidType());
+                            if (tile.liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                tile.liquid = (byte)num;
+                                map.AddWater(x - 1, y);
+                            }
+                            tile2.liquidType(tile5.liquidType());
+                            if (tile2.liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                tile2.liquid = (byte)num;
+                                map.AddWater(x + 1, y);
+                            }
+                            map[x + 2, y].liquidType(tile5.liquidType());
+                            if (map[x + 2, y].liquid != (byte)num || tile5.liquid != (byte)num)
+                            {
+                                map[x + 2, y].liquid = (byte)num;
+                                map.AddWater(x + 2, y);
+                            }
+                            tile5.liquid = (byte)num;
+                        }
+                        else
+                        {
+                            num = tile.liquid + tile2.liquid + tile5.liquid + num2;
+                            num = (float)Math.Round(num / 3f);
+                            if (num == 254f && WorldGen.genRand.Next(30) == 0)
+                            {
+                                num = 255f;
+                            }
+                            tile.liquidType(tile5.liquidType());
+                            if (tile.liquid != (byte)num)
+                            {
+                                tile.liquid = (byte)num;
+                                map.AddWater(x - 1, y);
+                            }
+                            tile2.liquidType(tile5.liquidType());
+                            if (tile2.liquid != (byte)num)
+                            {
+                                tile2.liquid = (byte)num;
+                                map.AddWater(x + 1, y);
+                            }
+                            tile5.liquid = (byte)num;
+                        }
+                    }
+                    else if (flag2)
+                    {
+                        num = tile.liquid + tile5.liquid + num2;
+                        num = (float)Math.Round(num / 2f);
+                        if (tile.liquid != (byte)num)
+                        {
+                            tile.liquid = (byte)num;
+                        }
+                        tile.liquidType(tile5.liquidType());
+                        if (tile5.liquid != (byte)num || tile.liquid != (byte)num)
+                        {
+                            map.AddWater(x - 1, y);
+                        }
+                        tile5.liquid = (byte)num;
+                    }
+                    else if (flag3)
+                    {
+                        num = tile2.liquid + tile5.liquid + num2;
+                        num = (float)Math.Round(num / 2f);
+                        if (tile2.liquid != (byte)num)
+                        {
+                            tile2.liquid = (byte)num;
+                        }
+                        tile2.liquidType(tile5.liquidType());
+                        if (tile5.liquid != (byte)num || tile2.liquid != (byte)num)
+                        {
+                            map.AddWater(x + 1, y);
+                        }
+                        tile5.liquid = (byte)num;
+                    }
+                }
+                if (tile5.liquid != liquid)
+                {
+                    if (tile5.liquid == 254 && liquid == byte.MaxValue)
+                    {
+                        if (map.quickSettle)
+                        {
+                            tile5.liquid = byte.MaxValue;
+                            kill++;
+                        }
+                        else
+                        {
+                            kill++;
+                        }
+                    }
+                    else
+                    {
+                        map.AddWater(x, y - 1);
+                        kill = 0;
+                    }
+                }
+                else
+                {
+                    kill++;
+                }
+            }
+
+        }
+        [MessagePackObject]
+        public class LiquidBuffer
+        {
+            [Key(0)]
+            public int x;
+            [Key(1)]
+            public int y;
+        }
     }
+    [MessagePackObject]
     [Serializable]
     [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 13)]
     public struct StructTile
     {
+        [Key(0)]
         public byte wall;
-
+        [Key(1)]
         public byte liquid;
-
+        [Key(2)]
         public byte bTileHeader;
-
+        [Key(3)]
         public byte bTileHeader2;
-
+        [Key(4)]
         public byte bTileHeader3;
-
+        [Key(5)]
         public ushort type;
-
+        [Key(6)]
         public short sTileHeader;
-
+        [Key(7)]
         public short frameX;
-
+        [Key(8)]
         public short frameY;
     }
+    [MessagePackObject(keyAsPropertyName: true)]
     [Serializable]
-    public class FakeTileProvider : ITileCollection, IDisposable
+    public class FakeTileProvider : ITileCollection, IDisposable, ICloneable
     {
-        private StructTile[,] Data;
-
+        object ICloneable.Clone()
+        {
+            return this.Clone();
+        }
+        public FakeTileProvider Clone()
+        {
+            return (FakeTileProvider)this.MemberwiseClone();
+        }
+        public StructTile[,] Data;
         public int Width
         {
             get;
         }
-
         public int Height
         {
             get;
@@ -30624,7 +32999,7 @@ namespace EternalLandPlugin.Game
                 new TileReference(Data, X, Y).CopyFrom(value);
             }
         }
-
+        [SerializationConstructor]
         public FakeTileProvider(int Width, int Height)
         {
             this.Width = Width;
@@ -30657,6 +33032,8 @@ namespace EternalLandPlugin.Game
             Data = null;
         }
     }
+    [MessagePackObject(keyAsPropertyName: true)]
+    [Serializable]
     public sealed class TileReference : ITile
     {
         public const int Type_Solid = 0;
@@ -31323,5 +33700,245 @@ namespace EternalLandPlugin.Game
         {
         }
     }
+    [MessagePackObject(keyAsPropertyName: true)]
+    [Serializable]
+    public class TileObjectPreviewData
+    {
+        public ushort _type;
 
+        public short _style;
+
+        public int _alternate;
+
+        public int _random;
+
+        public bool _active;
+
+        public Point16 _size;
+
+        public Point16 _coordinates;
+
+        public Point16 _objectStart;
+
+        public int[,] _data;
+
+        public Point16 _dataSize;
+
+        public float _percentValid;
+
+        public static TileObjectPreviewData placementCache;
+
+        public static TileObjectPreviewData randomCache;
+
+        public const int None = 0;
+
+        public const int ValidSpot = 1;
+
+        public const int InvalidSpot = 2;
+
+        public bool Active
+        {
+            get
+            {
+                return _active;
+            }
+            set
+            {
+                _active = value;
+            }
+        }
+
+        public ushort Type
+        {
+            get
+            {
+                return _type;
+            }
+            set
+            {
+                _type = value;
+            }
+        }
+
+        public short Style
+        {
+            get
+            {
+                return _style;
+            }
+            set
+            {
+                _style = value;
+            }
+        }
+
+        public int Alternate
+        {
+            get
+            {
+                return _alternate;
+            }
+            set
+            {
+                _alternate = value;
+            }
+        }
+
+        public int Random
+        {
+            get
+            {
+                return _random;
+            }
+            set
+            {
+                _random = value;
+            }
+        }
+
+        public Point16 Size
+        {
+            get
+            {
+                return _size;
+            }
+            set
+            {
+                if (value.X <= 0 || value.Y <= 0)
+                {
+                    return;
+                }
+                if (value.X > _dataSize.X || value.Y > _dataSize.Y)
+                {
+                    int num = (value.X > _dataSize.X) ? value.X : _dataSize.X;
+                    int num2 = (value.Y > _dataSize.Y) ? value.Y : _dataSize.Y;
+                    int[,] array = new int[num, num2];
+                    if (_data != null)
+                    {
+                        for (int i = 0; i < _dataSize.X; i++)
+                        {
+                            for (int j = 0; j < _dataSize.Y; j++)
+                            {
+                                array[i, j] = _data[i, j];
+                            }
+                        }
+                    }
+                    _data = array;
+                    _dataSize = new Point16(num, num2);
+                }
+                _size = value;
+            }
+        }
+
+        public Point16 Coordinates
+        {
+            get
+            {
+                return _coordinates;
+            }
+            set
+            {
+                _coordinates = value;
+            }
+        }
+
+        public Point16 ObjectStart
+        {
+            get
+            {
+                return _objectStart;
+            }
+            set
+            {
+                _objectStart = value;
+            }
+        }
+
+        public int this[int x, int y]
+        {
+            get
+            {
+                if (x < 0 || y < 0 || x >= _size.X || y >= _size.Y)
+                {
+                    throw new IndexOutOfRangeException();
+                }
+                return _data[x, y];
+            }
+            set
+            {
+                if (x < 0 || y < 0 || x >= _size.X || y >= _size.Y)
+                {
+                    throw new IndexOutOfRangeException();
+                }
+                _data[x, y] = value;
+            }
+        }
+
+        public void Reset()
+        {
+            _active = false;
+            _size = Point16.Zero;
+            _coordinates = Point16.Zero;
+            _objectStart = Point16.Zero;
+            _percentValid = 0f;
+            _type = 0;
+            _style = 0;
+            _alternate = -1;
+            _random = -1;
+            if (_data != null)
+            {
+                Array.Clear(_data, 0, _dataSize.X * _dataSize.Y);
+            }
+        }
+
+        public void CopyFrom(TileObjectPreviewData copy)
+        {
+            _type = copy._type;
+            _style = copy._style;
+            _alternate = copy._alternate;
+            _random = copy._random;
+            _active = copy._active;
+            _size = copy._size;
+            _coordinates = copy._coordinates;
+            _objectStart = copy._objectStart;
+            _percentValid = copy._percentValid;
+            if (_data == null)
+            {
+                _data = new int[copy._dataSize.X, copy._dataSize.Y];
+                _dataSize = copy._dataSize;
+            }
+            else
+            {
+                Array.Clear(_data, 0, _data.Length);
+            }
+            if (_dataSize.X < copy._dataSize.X || _dataSize.Y < copy._dataSize.Y)
+            {
+                int num = (copy._dataSize.X > _dataSize.X) ? copy._dataSize.X : _dataSize.X;
+                int num2 = (copy._dataSize.Y > _dataSize.Y) ? copy._dataSize.Y : _dataSize.Y;
+                _data = new int[num, num2];
+                _dataSize = new Point16(num, num2);
+            }
+            for (int i = 0; i < copy._dataSize.X; i++)
+            {
+                for (int j = 0; j < copy._dataSize.Y; j++)
+                {
+                    _data[i, j] = copy._data[i, j];
+                }
+            }
+        }
+
+        public void AllInvalid()
+        {
+            for (int i = 0; i < _size.X; i++)
+            {
+                for (int j = 0; j < _size.Y; j++)
+                {
+                    if (_data[i, j] != 0)
+                    {
+                        _data[i, j] = 2;
+                    }
+                }
+            }
+        }
+    }
 }
