@@ -1,9 +1,5 @@
-﻿using System;
+﻿using EternalLandPlugin.Account;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using EternalLandPlugin.Account;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -15,7 +11,7 @@ namespace EternalLandPlugin
             var cmd = args.Parameters;
             var tsp = args.Player;
             var eplr = tsp.EPlayer();
-            if(eplr == null)
+            if (eplr == null)
             {
                 tsp.SendErrorMessage("你尚未注册, 无法使用此命令.");
                 return;
@@ -40,7 +36,7 @@ namespace EternalLandPlugin
                                 {
                                     tsp.SendErrorEX("该玩家尚未注册.");
                                 }
-                                else if(!eplr.TakeMoney(value, $"<转给玩家: {receive.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48), true))
+                                else if (!eplr.TakeMoney(value, $"<转给玩家: {receive.Name}>", new Microsoft.Xna.Framework.Color(155, 56, 48), true))
                                 {
                                     tsp.SendErrorEX($"资产不足. 当前你的账户中还剩余 {eplr.Money.ToColorful()}.");
                                 }

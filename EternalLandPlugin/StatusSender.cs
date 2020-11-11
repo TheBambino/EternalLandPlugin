@@ -1,11 +1,8 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
+﻿using Microsoft.Xna.Framework;
+using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using EternalLandPlugin.Account;
-using Microsoft.Xna.Framework;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -66,24 +63,25 @@ namespace EternalLandPlugin
                         tsp.SendData(PacketTypes.Status, text);
                     });
                 }
-                catch (Exception ex){ Log.Error(ex.Message ); }
+                catch (Exception ex) { Log.Error(ex.Message); }
                 Thread.Sleep(100);
             }
         }
 
         public async static void GetPingPakcet(TSPlayer tsp)
         {
-            await Task.Run(() => {
+            await Task.Run(() =>
+            {
                 var eplr = tsp.EPlayer();
                 if (eplr != null)
                 {
-                    eplr.ping = eplr.PingChecker.ElapsedMilliseconds == 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
+                    eplr.ping = eplr.PingChecker.ElapsedMilliseconds - 16 <= 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
                     Thread.Sleep(200);
                     eplr.PingChecker.Restart();
                 }
-                
+
                 tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
-            });  
+            });
         }
 
         public static double colornum = 0;

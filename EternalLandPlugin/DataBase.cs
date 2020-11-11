@@ -1,20 +1,16 @@
-﻿using System;
+﻿using EternalLandPlugin.Account;
+using EternalLandPlugin.Game;
+using MessagePack;
+using Newtonsoft.Json;
+using System;
 using System.Collections.Generic;
 using System.Data;
-using System.IO;
 using System.Linq;
 using System.Reflection;
-using System.Runtime.Serialization.Formatters.Binary;
-using System.Text;
+using System.Runtime.InteropServices;
 using System.Threading.Tasks;
-using EternalLandPlugin.Account;
-using EternalLandPlugin.Game;
-using Newtonsoft.Json;
 using TShockAPI;
 using TShockAPI.DB;
-using static EternalLandPlugin.Account.EPlayer;
-using MessagePack;
-using EternalLandPlugin.Net;
 
 namespace EternalLandPlugin
 {
@@ -236,45 +232,48 @@ namespace EternalLandPlugin
             });
         }
 
-        public static async Task<bool> SaveMap(string name, MapManager.MapData data)
+        public static async void SaveMap(string name, MapManager.MapData data)
         {
-            return await Task.Run(() =>
+            await Task.Run(() =>
             {
                 try
                 {
-                    System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
-                    alltime.Start();
-                    byte[] map = MessagePackSerializer.Serialize(value: data, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
-                    alltime.Stop();
-                    Log.Info($"耗时 {alltime.ElapsedMilliseconds} ms, 文件大小为 {Math.Round(((double)map.Length) / 1024 / 1024, 4)} MB, 地图大小为 {data.Width} * {data.Height}.\n开始上传至数据库.");
-                    IDbConnection dbConnection = TShock.DB.CloneEx();
-                    QueryResult result;
-                    try
+                    lock (data)
                     {
-                        dbConnection.Open();
-                        using (IDbCommand dbCommand = dbConnection.CreateCommand())
+                        System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
+                        alltime.Start();
+                        byte[] map = MessagePackSerializer.Serialize(value: data, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
+                        alltime.Stop();
+                        Log.Info($"序列化地图 {name} 耗时 {alltime.ElapsedMilliseconds} ms, 文件大小为 {Math.Round(((double)map.Length) / 1024 / 1024, 4)} MB, 地图大小为 {data.Width} * {data.Height}.\n开始上传至数据库.");
+                        IDbConnection dbConnection = TShock.DB.CloneEx();
+                        QueryResult result;
+                        try
                         {
-                            var args = new object[] { name, map, map.Length };
-                            dbCommand.CommandText = $"REPLACE INTO EternalLandMap SET Name=@0,Data=@1,Length=@2";
-                            for (int i = 0; i < args.Length; i++)
+                            dbConnection.Open();
+                            using (IDbCommand dbCommand = dbConnection.CreateCommand())
                             {
-                                dbCommand.AddParameter("@" + i.ToString(), args[i]);
+                                var args = new object[] { name, map, map.Length };
+                                dbCommand.CommandText = $"REPLACE INTO EternalLandMap SET Name=@0,Data=@1,Length=@2";
+                                for (int i = 0; i < args.Length; i++)
+                                {
+                                    dbCommand.AddParameter("@" + i.ToString(), args[i]);
+                                }
+                                dbCommand.CommandTimeout = 60000;
+                                result = new QueryResult(dbConnection, dbCommand.ExecuteReader());
+                                Log.Info($"地图 {name} 上传完成.");
+                                if (!GameData.Map.ContainsKey(name)) GameData.Map.Add(name, map);
+                                else GameData.Map[name] = map;
+                                return;
                             }
-                            dbCommand.CommandTimeout = 60000;
-                            result = new QueryResult(dbConnection, dbCommand.ExecuteReader());
-                            Log.Info("上传完成.");
-                            if(!Game.GameData.Map.ContainsKey(name)) GameData.Map.Add(name, map);
-                            return true;
                         }
-                    }
-                    catch (Exception innerException)
-                    {
-                        Log.Error("Fatal TShock initialization exception: failed to connect to MySQL database. See inner exception for details.\n" + innerException);
-                        return false;
+                        catch (Exception innerException)
+                        {
+                            Log.Error("SQL异常.\n" + innerException);
+                            return;
+                        }
                     }
                 }
                 catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
-                return false;
             });
         }
         public static async void GetAllMap()

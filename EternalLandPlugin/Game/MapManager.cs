@@ -1,7 +1,7 @@
 ﻿using EternalLandPlugin.Account;
 using EternalLandPlugin.Net;
+using MessagePack;
 using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics;
 using OTAPI.Tile;
 using System;
 using System.Collections.Generic;
@@ -12,34 +12,29 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Runtime.InteropServices;
 using System.Runtime.Serialization.Formatters.Binary;
-using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
 using Terraria.DataStructures;
 using Terraria.Enums;
 using Terraria.GameContent;
-using Terraria.GameContent.Achievements;
-using Terraria.GameContent.Bestiary;
 using Terraria.GameContent.Events;
 using Terraria.GameContent.Tile_Entities;
 using Terraria.GameContent.UI;
 using Terraria.ID;
 using Terraria.Localization;
-using Terraria.Net.Sockets;
 using Terraria.ObjectData;
 using Terraria.Social;
 using Terraria.Utilities;
-using TerrariaApi.Server;
 using TShockAPI;
 using static Terraria.Framing;
-using Color = Microsoft.Xna.Framework.Color;
-using Point = Microsoft.Xna.Framework.Point;
-using Point16 = EternalLandPlugin.Game.MapManager.MapData.Point16;
 using Chest = EternalLandPlugin.Game.MapTools.Chest;
+using Color = Microsoft.Xna.Framework.Color;
 using Liquid = EternalLandPlugin.Game.MapTools.Liquid;
 using LiquidBuffer = EternalLandPlugin.Game.MapTools.LiquidBuffer;
-using MessagePack;
+using Point = Microsoft.Xna.Framework.Point;
+using Point16 = EternalLandPlugin.Game.MapManager.MapData.Point16;
+using Sign = EternalLandPlugin.Game.MapTools.Sign;
 
 namespace EternalLandPlugin.Game
 {
@@ -69,18 +64,20 @@ namespace EternalLandPlugin.Game
                 Sign.Clear();
                 Player.Clear();
             }
-            public MapData(Point topleft, Point bottomright, string name = "UnKnown", Guid uuid = default, bool keepalive = false)
+            public MapData(Point topleft, Point bottomright, string name = "UnKnown", Guid uuid = default, int owner = -1, bool keepalive = false)
             {
                 UUID = uuid;
                 Name = name;
+                Owner = owner;
                 KeepAlive = keepalive;
                 ReadTile(topleft.X, topleft.Y, bottomright.X - topleft.X, bottomright.Y - topleft.Y);
             }
 
-            public MapData(int StartX, int StartY, int width, int height, string name = "UnKnown", Guid uuid = default, bool keepalive = false)
+            public MapData(int StartX, int StartY, int width, int height, string name = "UnKnown", Guid uuid = default, int owner = -1, bool keepalive = false)
             {
                 UUID = uuid;
                 Name = name;
+                Owner = owner;
                 KeepAlive = keepalive;
                 ReadTile(StartX, StartY, width, height);
             }
@@ -104,7 +101,11 @@ namespace EternalLandPlugin.Game
                 Tile = new FakeTileProvider(0, 0);
                 Initialize();
             }
-
+            public void Save()
+            {
+                if (Owner == -1) DataBase.SaveMap(Name, this);
+                else DataBase.SaveMap(UUID.ToString(), this);
+            }
             void ReadTile(int StartX, int StartY, int width, int height)
             {
                 /*await Task.Run(() =>
@@ -131,33 +132,30 @@ namespace EternalLandPlugin.Game
                                 if (chestid != -1)
                                 {
                                     var temp = Main.chest[chestid];
-                                    temp.x = x;
-                                    temp.y = y;
-                                    if (chestid != -1) Chest[chest] = new Chest() { name = temp.name, bankChest = temp.bankChest, item = temp.item.ToEItems(), frame = temp.frame, frameCounter = temp.frameCounter, x = temp.x, y = temp.y };
+                                    Chest.Add(new Chest() { name = temp.name, bankChest = temp.bankChest, item = temp.item.ToEItems(), frame = temp.frame, frameCounter = temp.frameCounter, x = x, y = y });
                                     chest++;
                                 }
                             }
                             if ((temptile.type == 85 | temptile.type == 55 || temptile.type == 425) && temptile.frameX % 36 == 0 && temptile.frameY % 36 == 0)
                             {
-                                int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, true);
-                                var temp = Main.sign[signid];
-                                temp.x = x;
-                                temp.y = y;
-                                if (signid != -1) Sign.Add((short)sign, temp);
-                                sign++;
+                                int signid = (short)Terraria.Sign.ReadSign(tilex, tiley, false);
+                                if (signid != -1)
+                                {
+                                    var temp = Main.sign[signid];
+                                    Sign.Add(new Sign() { x = x, y = y, text = temp.text });
+                                    sign++;
+                                }
                             }
-                            if (temptile.liquid != 0)
+                            /*if (temptile.liquid != 0)
                             {
-                                Console.WriteLine("氵");
                                 Liquid[numLiquid].x = x;
                                 Liquid[numLiquid].y = y;
                                 Liquid[numLiquid].kill = 0;
                                 Liquid[numLiquid].delay = 0;
                                 numLiquid++;
-                            }
+                            }*/
                         }
                         catch (Exception ex) { Console.WriteLine($"{ex}\n世界坐标: {tilex} - {tiley} , 相对坐标: {x} - {y}"); }
-
                         x++;
                     }
                     y++;
@@ -324,23 +322,16 @@ namespace EternalLandPlugin.Game
             }
             public int FindChest(int X, int Y)
             {
-                GetRelative(X, Y, out int x, out int y);
-                for (int i = 0; i < 8000; i++)
+                if (GetRelative(X, Y, out int x, out int y))
                 {
-                    if (Chest[i] != null && Chest[i].x == x && Chest[i].y == y)
-                    {
-                        return i;
-                    }
+                    var list = Chest.Where(c => c != null && c.x == x && c.y == y).ToList();
+                    if (list.Any()) return Chest.IndexOf(list[0]);
                 }
                 return -1;
             }
-            public int FindSign(int rx, int ry)
-            {
-                var sign = -1;
-                Sign.ForEach(c => { if (c.Value.x == rx && c.Value.y == ry) { sign = c.Key; return; } });
-                return sign;
-            }
+
             public string Name = "UnKnown";
+            public int Owner = -1;
             public bool KeepAlive = false;
             public static readonly int ChuckSize = 100;
             public bool Origin = false;
@@ -356,9 +347,8 @@ namespace EternalLandPlugin.Game
             public Liquid[] Liquid = new Liquid[25000];
             public LiquidBuffer[] LiquidBuffer = new LiquidBuffer[50000];
             public List<int> Player = new List<int>();
-            public Chest[] Chest = new Chest[8000];
-            [IgnoreMember]
-            public Dictionary<short, Sign> Sign = new Dictionary<short, Sign>();
+            public List<Chest> Chest = new List<Chest>();
+            public List<Sign> Sign = new List<Sign>();
             //public Projectile[] Proj = new Projectile[1000];
             //public NPC[] Npc = new NPC[1000];
             //public ITile[,] Tile;
@@ -397,9 +387,54 @@ namespace EternalLandPlugin.Game
                     }
                 }
             }
-
+            public void Initialize()
+            {
+                InitializeMinecart();
+                InitializeWiring();
+                for (int j = 0; j < maxLiquid; j++)
+                {
+                    Liquid[j] = new Liquid();
+                }
+                for (int k = 0; k < 50000; k++)
+                {
+                    LiquidBuffer[k] = new LiquidBuffer();
+                }
+            }
 
             #region 一些操作物块的方法
+            public int ReadSign(int x, int y, bool CreateIfMissing = true)
+            {
+                int num = this[x, y].frameX / 18;
+                int num2 = this[x, y].frameY / 18;
+                num %= 2;
+                int num3 = x - num;
+                int num4 = y - num2;
+                if (!Main.tileSign[this[num3, num4].type])
+                {
+                    KillSign(num3, num4);
+                    return -1;
+                }
+                int num5 = -1;
+                if (GetRelative(x, y, out int X, out int Y))
+                {
+                    var list = Sign.Where(s => s != null && s.x == X && s.y == Y).ToList();
+                    if (list.Any()) num5 = Sign.IndexOf(list[0]);
+                    if (num5 < 0 && CreateIfMissing)
+                    {
+                        num5 = Sign.Count;
+                        AddSign(x, y);
+                    }
+                }
+                return num5;
+            }
+            public void AddSign(int x, int y, string text = "")
+            {
+                if (GetRelative(x, y, out int X, out int Y) && ReadSign(x, y, false) == -1)
+                {
+                    Sign.Add(new Sign() { x = X, y = Y, text = text });
+                }
+
+            }
             public bool ReplaceWall(int x, int y, ushort targetWall)
             {
                 if (targetWall >= 316)
@@ -9786,12 +9821,10 @@ namespace EternalLandPlugin.Game
             }
             public void KillSign(int x, int y)
             {
-                foreach (var key in Sign.Keys)
+                if (GetRelative(x, y, out int X, out int Y))
                 {
-                    if (Sign[key] != null && Sign[key].x == x && Sign[key].y == y)
-                    {
-                        Sign.Remove(key);
-                    }
+                    var list = Sign.Where(s => s != null && s.x == X && s.y == Y).ToList();
+                    if (list.Any()) Sign.Remove(list[0]);
                 }
             }
             public bool RightEdgeCanBeAttachedTo(int i, int j)
@@ -21579,49 +21612,44 @@ namespace EternalLandPlugin.Game
                 }
                 return false;
             }
-            public int FindEmptyChest(int x, int y, int type = 21, int style = 0, int direction = 1, int alternate = 0)
+            /*public int FindEmptyChest(int x, int y, int type = 21, int style = 0, int direction = 1, int alternate = 0)
             {
-                GetRelative(x, y, out int rx, out int ry);
                 int num = -1;
-                for (int i = 0; i < 8000; i++)
+                if (GetRelative(x, y, out int rx, out int ry))
                 {
-                    Chest chest = Chest[i];
-                    if (chest != null)
+                    for (int i = 0; i < 8000; i++)
                     {
-                        if (chest.x == rx && chest.y == ry)
+                        Chest chest = Chest[i];
+                        if (chest != null)
                         {
-                            return -1;
+                            if (chest.x == rx && chest.y == ry)
+                            {
+                                return -1;
+                            }
                         }
-                    }
-                    else if (num == -1)
-                    {
-                        num = i;
+                        else if (num == -1)
+                        {
+                            num = i;
+                        }
                     }
                 }
                 return num;
-            }
+            }*/
             public int CreateChest(int X, int Y, int id = -1)
             {
-                GetRelative(X, Y, out int x, out int y);
                 int num = id;
-                if (num == -1)
+                if (GetRelative(X, Y, out int x, out int y))
                 {
-                    num = FindEmptyChest(X, Y);
-                    if (num == -1)
+                    num = Chest.Count;
+                    Chest.Add(new Chest
                     {
-                        return -1;
-                    }
-                    if (Main.netMode == 1)
+                        x = x,
+                        y = y
+                    });
+                    for (int i = 0; i < 40; i++)
                     {
-                        return num;
+                        Chest[num].item[i] = new EItem();
                     }
-                }
-                Chest[num] = new Chest();
-                Chest[num].x = x;
-                Chest[num].y = y;
-                for (int i = 0; i < 40; i++)
-                {
-                    Chest[num].item[i] = new EItem();
                 }
                 return num;
             }
@@ -21650,6 +21678,79 @@ namespace EternalLandPlugin.Game
                     num = -1;
                 }
                 return num;
+            }
+            public void PlaceChestDirect(int x, int y, ushort type, int style, int id)
+            {
+                CreateChest(x, y - 1, id);
+                for (int i = 0; i <= 1; i++)
+                {
+                    for (int j = -1; j <= 0; j++)
+                    {
+                        if (this[x + i, y + j] == null)
+                        {
+                            this[x + i, y + j] = CreateTile();
+                        }
+                    }
+                }
+                this[x, y - 1].active(active: true);
+                this[x, y - 1].frameY = 0;
+                this[x, y - 1].frameX = (short)(36 * style);
+                this[x, y - 1].type = type;
+                this[x, y - 1].halfBrick(halfBrick: false);
+                this[x + 1, y - 1].active(active: true);
+                this[x + 1, y - 1].frameY = 0;
+                this[x + 1, y - 1].frameX = (short)(18 + 36 * style);
+                this[x + 1, y - 1].type = type;
+                this[x + 1, y - 1].halfBrick(halfBrick: false);
+                this[x, y].active(active: true);
+                this[x, y].frameY = 18;
+                this[x, y].frameX = (short)(36 * style);
+                this[x, y].type = type;
+                this[x, y].halfBrick(halfBrick: false);
+                this[x + 1, y].active(active: true);
+                this[x + 1, y].frameY = 18;
+                this[x + 1, y].frameX = (short)(18 + 36 * style);
+                this[x + 1, y].type = type;
+                this[x + 1, y].halfBrick(halfBrick: false);
+            }
+            public void PlaceDresserDirect(int x, int y, ushort type, int style, int id)
+            {
+                CreateChest(x - 1, y - 1, id);
+                for (int i = -1; i <= 1; i++)
+                {
+                    for (int j = -1; j <= 0; j++)
+                    {
+                        if (this[x + i, y + j] == null)
+                        {
+                            this[x + i, y + j] = CreateTile();
+                        }
+                    }
+                }
+                short num = (short)(style * 54);
+                this[x - 1, y - 1].active(active: true);
+                this[x - 1, y - 1].frameY = 0;
+                this[x - 1, y - 1].frameX = num;
+                this[x - 1, y - 1].type = type;
+                this[x, y - 1].active(active: true);
+                this[x, y - 1].frameY = 0;
+                this[x, y - 1].frameX = (short)(num + 18);
+                this[x, y - 1].type = type;
+                this[x + 1, y - 1].active(active: true);
+                this[x + 1, y - 1].frameY = 0;
+                this[x + 1, y - 1].frameX = (short)(num + 36);
+                this[x + 1, y - 1].type = type;
+                this[x - 1, y].active(active: true);
+                this[x - 1, y].frameY = 18;
+                this[x - 1, y].frameX = num;
+                this[x - 1, y].type = type;
+                this[x, y].active(active: true);
+                this[x, y].frameY = 18;
+                this[x, y].frameX = (short)(num + 18);
+                this[x, y].type = type;
+                this[x + 1, y].active(active: true);
+                this[x + 1, y].frameY = 18;
+                this[x + 1, y].frameX = (short)(num + 36);
+                this[x + 1, y].type = type;
             }
             public int UsingChest(int i)
             {
@@ -24985,30 +25086,22 @@ namespace EternalLandPlugin.Game
             }
             public bool DestroyChest(int X, int Y)
             {
-                GetRelative(X, Y, out int x, out int y);
-                for (int i = 0; i < 8000; i++)
+                if (GetRelative(X, Y, out int x, out int y))
                 {
-                    Chest chest = Chest[i];
-                    if (chest == null || chest.x != x || chest.y != y)
+                    var list = Chest.Where(c => c != null && c.x == x && c.y == y).ToList();
+                    if (list.Any())
                     {
-                        continue;
-                    }
-                    for (int j = 0; j < 40; j++)
-                    {
-                        if (chest.item[j] != null && chest.item[j].type > 0 && chest.item[j].stack > 0)
+                        for (int j = 0; j < 40; j++)
                         {
-                            return false;
+                            if (list[0].item[j] != null && list[0].item[j].type > 0 && list[0].item[j].stack > 0)
+                            {
+                                return false;
+                            }
                         }
+                        return true;
                     }
-                    Chest[i] = null;
-                    if (Main.player[Main.myPlayer].chest == i)
-                    {
-                        Main.player[Main.myPlayer].chest = -1;
-                    }
-                    Recipe.FindRecipes();
-                    return true;
                 }
-                return true;
+                return false;
             }
             public int NewItem(int X, int Y, int Width, int Height, int Type, int Stack = 1, bool noBroadcast = false, int pfix = 0, bool noGrabDelay = false, bool reverseLookup = false)
             {
@@ -25157,19 +25250,7 @@ namespace EternalLandPlugin.Game
                 return false;
             }
             #endregion
-            public void Initialize()
-            {
-                InitializeMinecart();
-                InitializeWiring();
-                for (int j = 0; j < maxLiquid; j++)
-                {
-                    Liquid[j] = new Liquid();
-                }
-                for (int k = 0; k < 50000; k++)
-                {
-                    LiquidBuffer[k] = new LiquidBuffer();
-                }
-            }
+
             #region 矿车
             public enum TrackState
             {
@@ -25230,7 +25311,6 @@ namespace EternalLandPlugin.Game
             public const int Type_Booster = 2;
             [IgnoreMember]
             public Vector2 _trackMagnetOffset = new Vector2(25f, 26f);
-
             public const float MinecartTextureWidth = 50f;
             [IgnoreMember]
             public int[] _leftSideConnection;
@@ -31631,27 +31711,37 @@ namespace EternalLandPlugin.Game
             data = new MapData();
             return false;
         }
-        public async static Task<Guid> CreateMultiPlayerMap(string name, int x = -1, int y = -1)
+        public static bool IsTerritoryActive(Guid uuid)
         {
+            return GameData.ActiveMap.ContainsKey(uuid);
+        }
+        public static Guid CreateMultiPlayerMap(string name, int x = -1, int y = -1)
+        {
+
             if (GameData.Map.ContainsKey(name))
             {
                 var data = GameData.GetMapData(name);
                 if (data == null) return Guid.Empty;
-                return CreateMultiPlayerMap(data, x, y);
+                return CreateMultiPlayerMap(data, x, y).Result;
             }
             else
             {
                 return Guid.Empty;
             }
+
         }
-        public static Guid CreateMultiPlayerMap(MapData data, int x = -1, int y = -1)
+        public async static Task<Guid> CreateMultiPlayerMap(MapData data, int x = -1, int y = -1)
         {
-            data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
-            data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
-            var uuid = Guid.NewGuid();
-            data.UUID = uuid;
-            GameData.ActiveMap.Add(uuid, data);
-            return uuid;
+            return await Task.Run(() =>
+            {
+                data.StartX = x == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : x;
+                data.StartY = y == -1 ? (Main.maxTilesX / 2) - (data.Width / 2) : y;
+                var uuid = Guid.NewGuid();
+                data.UUID = uuid;
+                data.Player.Clear();
+                GameData.ActiveMap.Add(uuid, data);
+                return uuid;
+            });
         }
         public static void AddPlayerToWorld(EPlayer eplr, Guid uuid)
         {
@@ -31660,7 +31750,7 @@ namespace EternalLandPlugin.Game
                 eplr.JoinMap(uuid);
             }
         }
-        public static void CheckMapAlive()
+        public static void CheckMapActive()
         {
             Dictionary<Guid, int> check = new Dictionary<Guid, int>();
             bool restartnow = false;
@@ -31721,7 +31811,7 @@ namespace EternalLandPlugin.Game
             {
                 GameData.ActiveMap.Values.ForEach(map =>
                 {
-                    //map.UpdateLiquid();
+                    map.UpdateLiquid();
                 });
             }
             catch { }
@@ -31741,10 +31831,9 @@ namespace EternalLandPlugin.Game
                     binaryWriter.BaseStream.Position = 0L;
                     binaryWriter.Write((short)position);
                     binaryWriter.BaseStream.Position = position;
-                    array = memoryStream.ToArray();
+                    eplr.SendRawData(memoryStream.ToArray());
                 }
-            }
-            eplr.SendRawData(array);
+            }            
         }
         static void WorldInfo(BinaryWriter binaryWriter, bool toorigin = false)
         {
@@ -31953,9 +32042,9 @@ namespace EternalLandPlugin.Game
 
         public static void CompressTileBlock_Inner(BinaryWriter writer, int xStart, int yStart, int width, int height, MapData data)
         {
-            short[] array = new short[8000];
-            short[] array2 = new short[1000];
-            short[] array3 = new short[1000];
+            List<short> array = new List<short>();
+            List<short> array2 = new List<short>();
+            List<int> array3 = new List<int>();
             short num = 0;
             short num2 = 0;
             short num3 = 0;
@@ -32016,7 +32105,7 @@ namespace EternalLandPlugin.Game
                             short num7 = (short)data.FindChest(j - xStart, i - yStart);
                             if (num7 != -1)
                             {
-                                array[num] = num7;
+                                array.Add(num7);
                                 num = (short)(num + 1);
                             }
                         }
@@ -32025,16 +32114,17 @@ namespace EternalLandPlugin.Game
                             short num8 = (short)data.FindChest(j - xStart, i - yStart);
                             if (num8 != -1)
                             {
-                                array[num] = num8;
+                                array.Add(num8);
                                 num = (short)(num + 1);
                             }
                         }
                         if ((tile2.type == 85 | tile2.type == 55 || tile2.type == 425 || tile2.type == 573) && tile2.frameX % 36 == 0 && tile2.frameY % 36 == 0)
                         {
-                            short num9 = (short)data.FindSign(j - xStart, i - yStart);
+                            short num9 = (short)data.ReadSign(j - xStart, i - yStart, true);
                             if (num9 != -1)
                             {
-                                array2[num2++] = num9;
+                                array2.Add(num9);
+                                num2++;
                             }
                         }
                         if (tile2.type == 378 && tile2.frameX % 36 == 0 && tile2.frameY == 0)
@@ -32042,7 +32132,8 @@ namespace EternalLandPlugin.Game
                             int num13 = TETrainingDummy.Find(j, i);
                             if (num13 != -1)
                             {
-                                array3[num3++] = (short)num13;
+                                array3.Add(num13);
+                                num3++;
                             }
                         }
                         if (tile2.type == 395 && tile2.frameX % 36 == 0 && tile2.frameY == 0)
@@ -32050,7 +32141,8 @@ namespace EternalLandPlugin.Game
                             int num14 = TEItemFrame.Find(j, i);
                             if (num14 != -1)
                             {
-                                array3[num3++] = (short)num14;
+                                array3.Add(num14);
+                                num3++;
                             }
                         }
                         if (tile2.type == 520 && tile2.frameX % 18 == 0 && tile2.frameY == 0)
@@ -32058,7 +32150,8 @@ namespace EternalLandPlugin.Game
                             int num15 = TEFoodPlatter.Find(j, i);
                             if (num15 != -1)
                             {
-                                array3[num3++] = (short)num15;
+                                array3.Add(num15);
+                                num3++;
                             }
                         }
                         if (tile2.type == 471 && tile2.frameX % 54 == 0 && tile2.frameY == 0)
@@ -32066,7 +32159,8 @@ namespace EternalLandPlugin.Game
                             int num16 = TEWeaponsRack.Find(j, i);
                             if (num16 != -1)
                             {
-                                array3[num3++] = (short)num16;
+                                array3.Add(num16);
+                                num3++;
                             }
                         }
                         if (tile2.type == 470 && tile2.frameX % 36 == 0 && tile2.frameY == 0)
@@ -32074,7 +32168,8 @@ namespace EternalLandPlugin.Game
                             int num17 = TEDisplayDoll.Find(j, i);
                             if (num17 != -1)
                             {
-                                array3[num3++] = (short)num17;
+                                array3.Add(num17);
+                                num3++;
                             }
                         }
                         if (tile2.type == 475 && tile2.frameX % 54 == 0 && tile2.frameY == 0)
@@ -32082,7 +32177,8 @@ namespace EternalLandPlugin.Game
                             int num18 = TEHatRack.Find(j, i);
                             if (num18 != -1)
                             {
-                                array3[num3++] = (short)num18;
+                                array3.Add(num18);
+                                num3++;
                             }
                         }
                         if (tile2.type == 597 && tile2.frameX % 54 == 0 && tile2.frameY % 72 == 0)
@@ -32090,7 +32186,8 @@ namespace EternalLandPlugin.Game
                             int num19 = TETeleportationPylon.Find(j, i);
                             if (num19 != -1)
                             {
-                                array3[num3++] = (short)num19;
+                                array3.Add(num19);
+                                num3++;
                             }
                         }
                         if (Main.tileFrameImportant[tile2.type])
@@ -32221,7 +32318,6 @@ namespace EternalLandPlugin.Game
 
         public static void SendSquare(int Size, int X, int Y, MapData data, EPlayer eplr, int Number5 = 0)
         {
-            byte[] array;
             using (MemoryStream memoryStream = new MemoryStream())
             {
                 using BinaryWriter binaryWriter = new BinaryWriter(memoryStream);
@@ -32232,9 +32328,9 @@ namespace EternalLandPlugin.Game
                 binaryWriter.BaseStream.Position = 0L;
                 binaryWriter.Write((short)position);
                 binaryWriter.BaseStream.Position = position;
-                array = memoryStream.ToArray();
+                eplr.SendRawData(memoryStream.ToArray());
             }
-            eplr.SendRawData(array);
+
         }
 
         private static void WriteTiles(BinaryWriter binaryWriter, int Size, int X, int Y, MapData data, int number5 = 0)
@@ -32326,7 +32422,7 @@ namespace EternalLandPlugin.Game
                     {
                         binaryWriter.Write(tile.wall);
                     }
-                    if (tile.liquid > 0 && Main.netMode == 2)
+                    if (tile.liquid > 0)
                     {
                         binaryWriter.Write(tile.liquid);
                         binaryWriter.Write(tile.liquidType());
@@ -32373,7 +32469,7 @@ namespace EternalLandPlugin.Game
                 bankChest = bank;
                 name = string.Empty;
             }
-            [SerializationConstructorAttribute]
+            [SerializationConstructor]
             public Chest()
             {
                 item = new EItem[40];
@@ -32415,6 +32511,25 @@ namespace EternalLandPlugin.Game
                 }
             }
 
+        }
+        [MessagePackObject]
+        public class Sign
+        {
+            [Key(0)]
+            public int x;
+            [Key(1)]
+            public int y;
+            [Key(2)]
+            public string text;
+            [SerializationConstructor]
+            public Sign()
+            {
+
+            }
+            public override string ToString()
+            {
+                return "x" + x + "\ty" + y + "\t" + text;
+            }
         }
         [MessagePackObject]
         public class Liquid
@@ -33032,34 +33147,34 @@ namespace EternalLandPlugin.Game
             Data = null;
         }
     }
-    [MessagePackObject(keyAsPropertyName: true)]
-    [Serializable]
+    [MessagePackObject]
     public sealed class TileReference : ITile
     {
+        [Key(0)]
         public const int Type_Solid = 0;
-
+        [Key(1)]
         public const int Type_Halfbrick = 1;
-
+        [Key(2)]
         public const int Type_SlopeDownRight = 2;
-
+        [Key(3)]
         public const int Type_SlopeDownLeft = 3;
-
+        [Key(4)]
         public const int Type_SlopeUpRight = 4;
-
+        [Key(5)]
         public const int Type_SlopeUpLeft = 5;
-
+        [Key(6)]
         public const int Liquid_Water = 0;
-
+        [Key(7)]
         public const int Liquid_Lava = 1;
-
+        [Key(8)]
         public const int Liquid_Honey = 2;
-
+        [Key(9)]
         internal readonly int X;
-
+        [Key(10)]
         internal readonly int Y;
-
+        [Key(11)]
         private StructTile[,] Data;
-
+        [Key(12)]
         private const double ActNum = 0.4;
 
         public ushort type
@@ -33700,42 +33815,42 @@ namespace EternalLandPlugin.Game
         {
         }
     }
-    [MessagePackObject(keyAsPropertyName: true)]
-    [Serializable]
+    [MessagePackObject]
     public class TileObjectPreviewData
     {
+        [Key(0)]
         public ushort _type;
-
+        [Key(1)]
         public short _style;
-
+        [Key(2)]
         public int _alternate;
-
+        [Key(3)]
         public int _random;
-
+        [Key(4)]
         public bool _active;
-
+        [Key(5)]
         public Point16 _size;
-
+        [Key(6)]
         public Point16 _coordinates;
-
+        [Key(7)]
         public Point16 _objectStart;
-
+        [Key(8)]
         public int[,] _data;
-
+        [Key(9)]
         public Point16 _dataSize;
-
+        [Key(10)]
         public float _percentValid;
-
+        [Key(11)]
         public static TileObjectPreviewData placementCache;
-
+        [Key(12)]
         public static TileObjectPreviewData randomCache;
-
+        [Key(13)]
         public const int None = 0;
-
+        [Key(14)]
         public const int ValidSpot = 1;
-
+        [Key(15)]
         public const int InvalidSpot = 2;
-
+        [Key(16)]
         public bool Active
         {
             get
@@ -33747,7 +33862,7 @@ namespace EternalLandPlugin.Game
                 _active = value;
             }
         }
-
+        [Key(17)]
         public ushort Type
         {
             get
@@ -33759,7 +33874,7 @@ namespace EternalLandPlugin.Game
                 _type = value;
             }
         }
-
+        [Key(18)]
         public short Style
         {
             get
@@ -33771,7 +33886,7 @@ namespace EternalLandPlugin.Game
                 _style = value;
             }
         }
-
+        [Key(19)]
         public int Alternate
         {
             get
@@ -33783,7 +33898,7 @@ namespace EternalLandPlugin.Game
                 _alternate = value;
             }
         }
-
+        [Key(20)]
         public int Random
         {
             get
@@ -33795,7 +33910,7 @@ namespace EternalLandPlugin.Game
                 _random = value;
             }
         }
-
+        [Key(21)]
         public Point16 Size
         {
             get
@@ -33829,7 +33944,7 @@ namespace EternalLandPlugin.Game
                 _size = value;
             }
         }
-
+        [Key(22)]
         public Point16 Coordinates
         {
             get
@@ -33841,7 +33956,7 @@ namespace EternalLandPlugin.Game
                 _coordinates = value;
             }
         }
-
+        [Key(23)]
         public Point16 ObjectStart
         {
             get

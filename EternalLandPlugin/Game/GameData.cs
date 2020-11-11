@@ -2,8 +2,6 @@
 using MessagePack;
 using System;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 
 namespace EternalLandPlugin.Game
@@ -30,11 +28,12 @@ namespace EternalLandPlugin.Game
         public static MapManager.MapData GetMapData(string name)
         {
             try { return GetMapDataDirect(name).Result; }
-            catch (Exception ex){ Log.Error(ex); return null; }
+            catch (Exception ex) { Log.Error(ex); return null; }
         }
         async static Task<MapManager.MapData> GetMapDataDirect(string name)
         {
-            return await Task.Run(() => {               
+            return await Task.Run(() =>
+            {
                 return MessagePackSerializer.Deserialize<MapManager.MapData>(Map[name], MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
             });
         }

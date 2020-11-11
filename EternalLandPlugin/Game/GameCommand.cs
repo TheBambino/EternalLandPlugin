@@ -1,10 +1,7 @@
 ﻿using EternalLandPlugin.Account;
 using MessagePack;
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
 using Terraria;
 using TShockAPI;
 
@@ -143,7 +140,8 @@ namespace EternalLandPlugin.Game
                                 else if (cmd[1] == "MainWorld")
                                 {
                                     var d = new MapManager.MapData(0, 0, Main.maxTilesX, Main.maxTilesY, cmd[1]);
-                                    if (DataBase.SaveMap(cmd[1], d).Result) tsp.SendSuccessEX("执行完成.");
+                                    DataBase.SaveMap(cmd[1], d);
+                                    tsp.SendSuccessEX("执行完成.");
                                     return;
                                 }
                                 else if (eplr.SettingPoint != 0)
@@ -162,14 +160,8 @@ namespace EternalLandPlugin.Game
                                     break;
                                 }
                                 var data = new MapManager.MapData(eplr.ChoosePoint[0], eplr.ChoosePoint[1], cmd[1]);
-                                if (DataBase.SaveMap(cmd[1], data).Result)
-                                {
-                                    tsp.SendSuccessEX("执行完成.");
-                                }
-                                else
-                                {
-                                    tsp.SendErrorEX($"发生错误, 详细信息请查看控制台.");
-                                }
+                                DataBase.SaveMap(cmd[1], data);
+                                tsp.SendSuccessEX("执行完成.");
                                 break;
                             case "goto":
                                 if (cmd.Count < 4)
@@ -182,16 +174,16 @@ namespace EternalLandPlugin.Game
                                     tsp.SendErrorEX($"未找到地图: {cmd[1]}");
                                     break;
                                 }
-                                eplr.JoinMap(await MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
+                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
                                 tsp.SendSuccessEX("执行完成.");
                                 break;
-                            case "wld":
+                            /*case "wld":
                                 if (cmd.Count > 2) eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394, int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
                                 else eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(int.Parse(cmd[1]), int.Parse(cmd[2]), 200, 200), 4100, 450));
                                 break;
                             case "clear":
                                 eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(), 4100, 400));
-                                break;
+                                break;*/
                             case "back":
                                 eplr.BackToOriginMap();
                                 break;
@@ -216,36 +208,63 @@ namespace EternalLandPlugin.Game
             if (eplr == null)
             {
                 tsp.SendErrorEX("你尚未登录.");
-                //return;
+                return;
             }
             else if (cmd.Count < 1)
             {
-                tsp.SendErrorEX(error + "请输入/territory(属地, sd) help 查看命令");
+                tsp.SendErrorEX(error + "请输入 /territory(属地, sd) help 查看命令");
                 return;
             }
-            
+
             switch (cmd[0].ToLower())
             {
                 case "create":
-
-                    break;
-                case "1":
-                    try {
-                        var az = new FakeTileProvider(10, 10);
-                        for (int y = 0; y < 10; y++)
+                    if (eplr.TerritoryUUID == Guid.Empty)
+                    {
+                        var uuid = MapManager.CreateMultiPlayerMap("DefaultTerritory", 0, 0);
+                        if (MapManager.GetMapFromUUID(uuid, out var map))
                         {
-                            for (int x = 0; x < 10; x++)
+                            map.Name = uuid.ToString();
+                            map.UUID = uuid;
+                            map.Owner = eplr.ID;
+                            map.KeepAlive = true;
+                            map.Save();
+                            eplr.SendSuccessEX($"成功创建属地, 正在传送...");
+                        }
+                        else
+                        {
+                            eplr.SendErrorEX($"创建失败, 请联系管理员.");
+                        }
+                    }
+                    else
+                    {
+                        eplr.SendErrorEX($"你已拥有一块属地, 请使用 {"/territory(属地, sd) my".ToColorful()} 前往.");
+                    }
+                    break;
+                case "my":
+                    if (eplr.TerritoryUUID != Guid.Empty)
+                    {
+                        if (eplr.MapUUID != eplr.TerritoryUUID)
+                        {
+                            if (MapManager.IsTerritoryActive(eplr.TerritoryUUID))
                             {
-                                az[x, y] = new Tile() { type = 20 };
+                                eplr.JoinMap(eplr.TerritoryUUID);
+                            }
+                            else
+                            {
+                                eplr.SendEX($"正在读入地图, 请稍候...");
+                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(eplr.TerritoryUUID.ToString(), 0, 0));
                             }
                         }
-                        var za = MessagePackSerializer.Deserialize<FakeTileProvider>(MessagePackSerializer.Serialize(az, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block)), MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
+                        else
+                        {
+                            eplr.SendErrorEX($"你已处在属地中.");
+                        }
                     }
-                    catch (Exception ex) { Utils.Broadcast(ex);
-                        Console.WriteLine(ex);
+                    else
+                    {
+                        eplr.SendErrorEX($"你尚未创建属地, 请输入 {"/territory(属地, sd) create".ToColorful()} 来获取.");
                     }
-                    
-                    
                     break;
             }
         }

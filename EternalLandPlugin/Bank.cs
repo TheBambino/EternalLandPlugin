@@ -1,13 +1,8 @@
-﻿using System;
+﻿using EternalLandPlugin.Account;
 using System.Collections.Generic;
-using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
-using Microsoft.Xna.Framework;
 using Terraria;
 using TShockAPI;
-using System.Threading;
-using EternalLandPlugin.Account;
 
 namespace EternalLandPlugin
 {

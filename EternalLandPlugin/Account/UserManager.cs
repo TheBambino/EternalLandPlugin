@@ -2,9 +2,7 @@
 using EternalLandPlugin.Net;
 using System;
 using System.Collections.Generic;
-using System.Diagnostics.Eventing.Reader;
 using System.Linq;
-using System.Text;
 using System.Threading.Tasks;
 using Terraria;
 using TShockAPI;
@@ -70,7 +68,7 @@ namespace EternalLandPlugin.Account
         public static bool GetTSPlayerFromName(string name, out TSPlayer tsp)
         {
             tsp = null;
-            foreach (var t in from t in TShock.Players where t!= null && t.Name == name select t)
+            foreach (var t in from t in TShock.Players where t != null && t.Name == name select t)
             {
                 tsp = t;
                 return true;
@@ -115,7 +113,7 @@ namespace EternalLandPlugin.Account
                 System.Threading.Thread.Sleep(1000);
                 SetCharacter(eplr);
                 SetBag(eplr);
-                
+
                 if (eplr.IsInAnotherWorld)
                 {
                     eplr.Map.GetAllPlayers().ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
@@ -163,7 +161,7 @@ namespace EternalLandPlugin.Account
                     {
                         e.tsp.SendData(PacketTypes.PlayerActive, "", eplr.Index, e.MapUUID == eplr.MapUUID ? 1 : 0);
                         eplr.SendData(PacketTypes.PlayerActive, "", e.Index, e.MapUUID == eplr.MapUUID ? 1 : 0);
-                    }                   
+                    }
                 });
             }
         }

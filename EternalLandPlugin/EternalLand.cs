@@ -1,17 +1,15 @@
-﻿using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Text;
-using System.Threading;
-using System.Threading.Tasks;
-using EternalLandPlugin.Account;
+﻿using EternalLandPlugin.Account;
 using EternalLandPlugin.Game;
 using EternalLandPlugin.Net;
 using Microsoft.Xna.Framework;
 using OTAPI;
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Terraria;
 using Terraria.Localization;
-using Terraria.Net.Sockets;
 using TerrariaApi.Server;
 using TShockAPI;
 
@@ -72,19 +70,20 @@ namespace EternalLandPlugin
             }
             else
             {
-                
+
                 DataBase.GetAllCharacter();
                 DataBase.GetAllMap();
                 ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendBytes);
-                ServerApi.Hooks.NetSendData.Register(this,GameNet.OnSendData);
+                ServerApi.Hooks.NetSendData.Register(this, GameNet.OnSendData);
                 ServerApi.Hooks.NetGetData.Register(this, GameNet.OnGetData);
-                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if(args.Player.IsLoggedIn) args.Handled = true; args.Player.SendData(PacketTypes.PlayerInfo, "", args.Player.Index); };
+                GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if (args.Player.IsLoggedIn) args.Handled = true; args.Player.SendData(PacketTypes.PlayerInfo, "", args.Player.Index); };
                 TShockAPI.Hooks.PlayerHooks.PlayerCommand += GameCommand.OnPlayerCommand;
                 GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
                 GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
-                GetDataHandlers.SendTileSquare += delegate(object o, GetDataHandlers.SendTileSquareEventArgs args) { args.Handled = true; };
+                GetDataHandlers.SendTileSquare += delegate (object o, GetDataHandlers.SendTileSquareEventArgs args) { args.Handled = true; };
                 GetDataHandlers.ChestOpen += GameNet.OnChestOpen;
+                //GetDataHandlers.Sign += GameNet.OnUpdateSign;
                 GetDataHandlers.LiquidSet += GameNet.OnLiquidSet;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
@@ -111,12 +110,14 @@ namespace EternalLandPlugin
                     HelpText = "小遊戲服管理員命令 <地图>."
                 });
 
-                new Thread(new ThreadStart(MapManager.CheckMapAlive)).Start();
-                new Thread(new ThreadStart(delegate {
+                new Thread(new ThreadStart(MapManager.CheckMapActive)).Start();
+                new Thread(new ThreadStart(delegate
+                {
                     while (true)
                     {
                         Thread.Sleep(1111);
-                        OnlineEPlayer.ForEach(e => {
+                        OnlineEPlayer.ForEach(e =>
+                        {
                             NetMessage.SendData(4, -1, -1, null, e.Index);
                             UserManager.SetBag(e);
                         });
@@ -126,7 +127,7 @@ namespace EternalLandPlugin
             StatusSender.SendStatus();
         }
 
-        
+
 
         protected override void Dispose(bool disposing)
         {

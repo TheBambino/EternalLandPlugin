@@ -1,14 +1,13 @@
-﻿using System;
+﻿using EternalLandPlugin.Account;
+using EternalLandPlugin.Game;
+using Microsoft.Xna.Framework;
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using EternalLandPlugin.Account;
-using EternalLandPlugin.Game;
-using Microsoft.Xna.Framework;
 using Terraria;
-using Terraria.Localization;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -79,7 +78,8 @@ namespace EternalLandPlugin
         }
         public async static Task<List<Item>> GetItemFromTile(int x, int y, OTAPI.Tile.ITile itile, MapManager.MapData map = null)
         {
-            return await Task.Run(() => {
+            return await Task.Run(() =>
+            {
                 List<Item> list = new List<Item>(2)
                 {
                     [0] = new Item(),
@@ -102,7 +102,7 @@ namespace EternalLandPlugin
                 return list;
             });
         }
-        public static void Broadcast(object text,Color color = default, bool allmap = true)
+        public static void Broadcast(object text, Color color = default, bool allmap = true)
         {
             EternalLand.OnlineTSPlayer.ForEach(tsp => tsp.SendEX(text, color == default ? new Color(212, 239, 245) : color));
         }

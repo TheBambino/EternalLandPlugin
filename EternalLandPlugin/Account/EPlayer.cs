@@ -1,24 +1,18 @@
-﻿using System;
+﻿using EternalLandPlugin.Game;
+using EternalLandPlugin.Net;
+using MessagePack;
+using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.Drawing;
-using System.IO;
-using System.Linq;
-using System.Text;
 using System.Threading;
-using System.Threading.Tasks;
-using System.Timers;
-using EternalLandPlugin.Game;
-using EternalLandPlugin.Net;
-using Newtonsoft.Json;
 using Terraria;
 using Terraria.Localization;
+using Terraria.UI.Gamepad;
 using TShockAPI;
-using TShockAPI.Net;
-using Timer = System.Timers.Timer;
 using Color = Microsoft.Xna.Framework.Color;
 using Point = Microsoft.Xna.Framework.Point;
-using MessagePack;
+using Timer = System.Timers.Timer;
 
 namespace EternalLandPlugin.Account
 {
@@ -43,7 +37,7 @@ namespace EternalLandPlugin.Account
                                     {
                                         if (!LoadedChuck[key] && key.IntersectsWith(new Rectangle(TileX - 75, TileY - 75, 150, 150)))
                                         {
-                                            SendChuck(key.X, key.Y,Map.GetChuck(key.X, key.Y).Result);
+                                            SendChuck(key.X, key.Y, Map.GetChuck(key.X, key.Y).Result);
                                             LoadedChuck[key] = true;
                                             Thread.Sleep(50);
                                         }
@@ -181,7 +175,7 @@ namespace EternalLandPlugin.Account
         [ShouldSave]
         public long Point = 0;
         public bool IsInAnotherWorld { get { return MapUUID != Guid.Empty; } }
-        public Guid MapUUID = Guid.Empty;        
+        public Guid MapUUID = Guid.Empty;
         public MapManager.MapData Map { get { return GameData.ActiveMap.ContainsKey(MapUUID) ? GameData.ActiveMap[MapUUID] : new MapManager.MapData(); } }
         public EPlayerData TempCharacter = new EPlayerData();
         public EPlayerData Character = new EPlayerData();
@@ -289,7 +283,12 @@ namespace EternalLandPlugin.Account
             }
             if (MapUUID != Guid.Empty)
             {
-                Map.Player.Remove(ID);
+                if (uuid == MapUUID)
+                {
+                    SendErrorEX($"无法传送至同一个地图.");
+                    return;
+                }
+                LeaveMap(Map);
             }
             MapUUID = uuid;
             SendEX($"传送至世界 [c/F97E63:{uuid.ToString().Split('-')[0]}], 可能会造成片刻卡顿.");
@@ -307,7 +306,15 @@ namespace EternalLandPlugin.Account
             MapManager.SendProjectile(this);
             if (!DynamicLoading.IsAlive) DynamicLoading.Start();
         }
-
+        public void LeaveMap(MapManager.MapData map)
+        {
+            map.Player.Remove(ID);
+            if(map.Owner == ID)
+            {
+                DataBase.SaveMap(map.UUID.ToString(), map);
+                SendEX($"已保存属地数据.");
+            }
+        }
         readonly Dictionary<Rectangle, bool> LoadedChuck = new Dictionary<Rectangle, bool>();
         Thread DynamicLoading;
         /// <summary>

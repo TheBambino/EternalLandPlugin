@@ -1,18 +1,11 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.IO.Streams;
-using System.Linq;
-using System.Text;
-using System.Threading.Tasks;
-using EternalLandPlugin.Account;
+﻿using EternalLandPlugin.Account;
 using EternalLandPlugin.Game;
 using EternalLandPlugin.Hungr;
-using OTAPI.Tile;
+using System;
+using System.IO;
+using System.IO.Streams;
 using Terraria;
 using Terraria.DataStructures;
-using Terraria.Localization;
-using Terraria.Net.Sockets;
 using TerrariaApi.Server;
 using TShockAPI;
 using TShockAPI.DB;
@@ -98,7 +91,7 @@ namespace EternalLandPlugin.Net
             UserAccount userAccount = TShock.UserAccounts.GetUserAccountByName(tsp.Name);
             var eplr = userAccount == null ? null : DataBase.GetEPlayer(userAccount.ID).Result;
             if (eplr != null)
-            {                
+            {
                 EternalLand.EPlayers[args.Who] = eplr;
                 eplr.SendBag();
                 Log.Info($"玩家 {eplr.Name} 数据已读取.");
@@ -120,7 +113,14 @@ namespace EternalLandPlugin.Net
                 EternalLand.EPlayers[args.Who].Dispose();
                 EternalLand.EPlayers[args.Who] = null;
                 Log.Info($"玩家 {eplr.Name} 数据已保存.");
-            }            
+                if (eplr.TerritoryUUID != Guid.Empty && MapManager.GetMapFromUUID(eplr.TerritoryUUID, out var map))
+                {
+                    map.Save();
+                    map.Dispose();
+                    GameData.ActiveMap[eplr.TerritoryUUID] = null;
+                    GameData.ActiveMap.Remove(eplr.TerritoryUUID);
+                }
+            }
         }
 
         public static void PlayerRegister(AccountCreateEventArgs args)
@@ -142,7 +142,7 @@ namespace EternalLandPlugin.Net
                     eplr.Life = life;
                     return false;
                 }
-                if(lifechange > 0 && !eplr.tsp.GodMode)
+                if (lifechange > 0 && !eplr.tsp.GodMode)
                 {
                     NetMessage.SendData(16, -1, -1, null, plr.whoAmI);
                     return true;
@@ -188,7 +188,7 @@ namespace EternalLandPlugin.Net
         {
             var npc = args.npc;
             Bank.OnKill(args.npc);
-            if ((npc.FullName.Contains("Slime") || npc.FullName.Contains("史莱姆")) &&  Utils.RANDOM.Next(0, 100) > 50) Utils.DropItem((int)npc.position.X, (int)npc.position.Y, 4009);
+            if ((npc.FullName.Contains("Slime") || npc.FullName.Contains("史莱姆")) && Utils.RANDOM.Next(0, 100) > 50) Utils.DropItem((int)npc.position.X, (int)npc.position.Y, 4009);
         }
 
 

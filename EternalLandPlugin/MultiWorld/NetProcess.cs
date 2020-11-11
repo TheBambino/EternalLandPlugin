@@ -1,35 +1,6 @@
-﻿using System;
-using System.Collections.Generic;
-using System.IO;
-using System.Linq;
-using System.Reflection;
-using System.Reflection.Emit;
-using Microsoft.Xna.Framework;
-using Microsoft.Xna.Framework.Graphics.PackedVector;
-using OTAPI;
-using OTAPI.Callbacks.Terraria;
-using OTAPI.Tile;
-using Terraria;
-using Terraria.Audio;
-using Terraria.Chat;
-using Terraria.DataStructures;
-using Terraria.Enums;
-using Terraria.GameContent;
-using Terraria.GameContent.Achievements;
-using Terraria.GameContent.Creative;
-using Terraria.GameContent.Events;
-using Terraria.GameContent.Golf;
-using Terraria.GameContent.Tile_Entities;
-using Terraria.GameContent.UI;
-using Terraria.ID;
-using Terraria.Localization;
-using Terraria.Net;
-using Terraria.Testing;
-using Terraria.UI;
-
-namespace EternalLandPlugin.MultiWorld
+﻿namespace EternalLandPlugin.MultiWorld
 {
-	/*public class MessageBuffer
+    /*public class MessageBuffer
 	{
 		internal static bool NameCollision(Player player)
 		{
