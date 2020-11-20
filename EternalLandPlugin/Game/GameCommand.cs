@@ -3,6 +3,8 @@ using MessagePack;
 using System;
 using System.Linq;
 using Terraria;
+using Terraria.Audio;
+using Terraria.ID;
 using TShockAPI;
 
 namespace EternalLandPlugin.Game
@@ -137,7 +139,7 @@ namespace EternalLandPlugin.Game
                                     tsp.SendErrorEX(error);
                                     break;
                                 }
-                                else if (cmd[1] == "MainWorld")
+                                else if (cmd[1] == "MainWorld" || cmd[1] == "DefaultTerritory")
                                 {
                                     var d = new MapManager.MapData(0, 0, Main.maxTilesX, Main.maxTilesY, cmd[1]);
                                     DataBase.SaveMap(cmd[1], d);
@@ -177,6 +179,29 @@ namespace EternalLandPlugin.Game
                                 eplr.JoinMap(MapManager.CreateMultiPlayerMap(cmd[1], int.Parse(cmd[2]), int.Parse(cmd[3])));
                                 tsp.SendSuccessEX("执行完成.");
                                 break;
+                            case "update":
+                                if (eplr.IsInAnotherWorld)
+                                {
+                                    eplr.Map.Save();
+                                    eplr.SendSuccessEX("执行完成.");
+                                }
+                                else
+                                {
+                                    eplr.SendErrorEX("未处于其他地图.");
+                                }
+                                break;
+                            case "setspawn":
+                                if (eplr.IsInAnotherWorld)
+                                {
+                                    eplr.Map.SetSpawn(eplr.TileX, eplr.TileY);
+                                    eplr.Map.Save();
+                                    eplr.SendSuccessEX("执行完成.");
+                                }
+                                else
+                                {
+                                    eplr.SendErrorEX("未处于其他地图.");
+                                }
+                                break;
                             /*case "wld":
                                 if (cmd.Count > 2) eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(2152, 394, int.Parse(cmd[1]), int.Parse(cmd[2])), 4100, 400));
                                 else eplr.JoinMap(MapManager.CreateMultiPlayerMap(new MapManager.MapData(int.Parse(cmd[1]), int.Parse(cmd[2]), 200, 200), 4100, 450));
@@ -191,7 +216,6 @@ namespace EternalLandPlugin.Game
                                 if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var t))
                                 {
                                     eplr.JoinMap(t[0].MapUUID);
-
                                 }
                                 break;
                         }
@@ -218,18 +242,29 @@ namespace EternalLandPlugin.Game
 
             switch (cmd[0].ToLower())
             {
+                case "1":
+                    if(cmd.Count > 2) NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, ushort.Parse(cmd[1]), int.Parse(cmd[2]), 1), tsp.Index);
+                    else NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, ushort.Parse(cmd[1]), -1, 1), tsp.Index);
+
+                    break;
                 case "create":
                     if (eplr.TerritoryUUID == Guid.Empty)
                     {
-                        var uuid = MapManager.CreateMultiPlayerMap("DefaultTerritory", 0, 0);
+                        eplr.SendEX($"正在创建属地, 请稍候...");
+                        var uuid = MapManager.CreateMultiPlayerMap("DefaultTerritory", 2100, 240);
                         if (MapManager.GetMapFromUUID(uuid, out var map))
                         {
-                            map.Name = uuid.ToString();
+                            map.Name = eplr.Name;
                             map.UUID = uuid;
                             map.Owner = eplr.ID;
                             map.KeepAlive = true;
                             map.Save();
-                            eplr.SendSuccessEX($"成功创建属地, 正在传送...");
+                            eplr.SendSuccessEX($"成功创建属地, 正在传送 <{"注: ".ToColorful()}属地大小为 4200 * 1200, 超出此区域的建造将无效>");
+                            Log.Info($"{eplr} 创建了属地.");
+                            eplr.TerritoryUUID = uuid;
+                            eplr.Save();
+                            eplr.VisitTerritory(uuid);
+                            
                         }
                         else
                         {
@@ -246,15 +281,7 @@ namespace EternalLandPlugin.Game
                     {
                         if (eplr.MapUUID != eplr.TerritoryUUID)
                         {
-                            if (MapManager.IsTerritoryActive(eplr.TerritoryUUID))
-                            {
-                                eplr.JoinMap(eplr.TerritoryUUID);
-                            }
-                            else
-                            {
-                                eplr.SendEX($"正在读入地图, 请稍候...");
-                                eplr.JoinMap(MapManager.CreateMultiPlayerMap(eplr.TerritoryUUID.ToString(), 0, 0));
-                            }
+                            eplr.VisitTerritory(eplr.TerritoryUUID);
                         }
                         else
                         {
@@ -264,6 +291,43 @@ namespace EternalLandPlugin.Game
                     else
                     {
                         eplr.SendErrorEX($"你尚未创建属地, 请输入 {"/territory(属地, sd) create".ToColorful()} 来获取.");
+                    }
+                    break;
+                case "visit":
+                    if (cmd.Count < 2)
+                    {
+                        eplr.SendErrorEX(error + "请输入想要参观的玩家名(不需要全部输入");
+                        return;
+                    }
+                    if (UserManager.TryGetEPlayeFuzzy(cmd[1], out var list, true))
+                    {
+                        if (list.Count == 1)
+                        {
+                            var wantvisit = list[0];
+                            if (wantvisit.TerritoryUUID != Guid.Empty)
+                            {
+                                eplr.VisitTerritory(wantvisit.TerritoryUUID);
+                            }
+                            else
+                            {
+                                eplr.SendErrorEX(error + $"此玩家尚未申请属地.");
+                            }
+                        }
+                        else
+                        {
+                            eplr.tsp.SendMultipleError(list);
+                        }
+                    }
+                    else
+                    {
+                        eplr.SendErrorEX(error + $"未找到名称中含有 {cmd[1].ToColorful()} 的玩家.");
+                    }
+                    break;
+                case "clear":
+                    if (eplr.MapUUID == eplr.TerritoryUUID)
+                    {
+                        eplr.Map.Items.ForEach(i => i = new EItem());
+                        MapManager.SendAllItem(eplr);
                     }
                     break;
             }

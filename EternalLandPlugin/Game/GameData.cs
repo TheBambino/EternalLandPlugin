@@ -24,11 +24,19 @@ namespace EternalLandPlugin.Game
         public readonly static Dictionary<string, byte[]> Map = new Dictionary<string, byte[]>();
 
         public readonly static Dictionary<Guid, MapManager.MapData> ActiveMap = new Dictionary<Guid, MapManager.MapData>();
+        public readonly static Dictionary<string, Skill> Skills = new Dictionary<string, Skill>();
 
-        public static MapManager.MapData GetMapData(string name)
+        public static bool GetMapData(string name, out MapManager.MapData map)
         {
-            try { return GetMapDataDirect(name).Result; }
-            catch (Exception ex) { Log.Error(ex); return null; }
+            map = null;
+            if (!Map.ContainsKey(name)) return false;
+            try
+            {
+                map = GetMapDataDirect(name).Result;
+                if (map == null) return false;
+                return true;
+            }
+            catch (Exception ex) { Log.Error(ex); map = null; return false; }
         }
         async static Task<MapManager.MapData> GetMapDataDirect(string name)
         {

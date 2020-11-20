@@ -32,9 +32,10 @@ using Chest = EternalLandPlugin.Game.MapTools.Chest;
 using Color = Microsoft.Xna.Framework.Color;
 using Liquid = EternalLandPlugin.Game.MapTools.Liquid;
 using LiquidBuffer = EternalLandPlugin.Game.MapTools.LiquidBuffer;
-using Point = Microsoft.Xna.Framework.Point;
+using Point = EternalLandPlugin.Game.MapTools.Point;
 using Point16 = EternalLandPlugin.Game.MapManager.MapData.Point16;
 using Sign = EternalLandPlugin.Game.MapTools.Sign;
+using Projectile = EternalLandPlugin.Game.MapTools.Projectile;
 
 namespace EternalLandPlugin.Game
 {
@@ -62,7 +63,22 @@ namespace EternalLandPlugin.Game
                 Tile.Dispose();
                 Tile = null;
                 Sign.Clear();
+                if (Player.Any())
+                {
+                    Player.ForEach(p => {
+                        if (UserManager.TryGetEPlayerFromID(p, out var eplr))
+                        {
+                            eplr.BackToOriginMap();
+                            eplr.SendInfoEX("当前地图已被注销, 返回主世界.");
+                        }
+                    });
+                }
                 Player.Clear();
+                if (GameData.ActiveMap.ContainsKey(UUID))
+                {
+                    GameData.ActiveMap[UUID] = null;
+                    GameData.ActiveMap.Remove(UUID);
+                }
             }
             public MapData(Point topleft, Point bottomright, string name = "UnKnown", Guid uuid = default, int owner = -1, bool keepalive = false)
             {
@@ -99,12 +115,12 @@ namespace EternalLandPlugin.Game
                 StartX = 0;
                 StartY = 0;
                 Tile = new FakeTileProvider(0, 0);
-                Initialize();
+                //Initialize();
             }
-            public void Save()
+            public bool Save()
             {
-                if (Owner == -1) DataBase.SaveMap(Name, this);
-                else DataBase.SaveMap(UUID.ToString(), this);
+                if (Owner == -1) return DataBase.SaveMap(Name, this).Result;
+                else return DataBase.SaveMap(UUID.ToString(), this).Result;
             }
             void ReadTile(int StartX, int StartY, int width, int height)
             {
@@ -200,6 +216,7 @@ namespace EternalLandPlugin.Game
                     }
                 });
             }
+            public void SendRawDataToPlayer(byte[] array) => GetAllPlayers().ForEach(e => e.SendRawData(array));
             public void SendDataToPlayer(int msgType, int remote, int ignore, string text = "", int number = 0, float number2 = 0f, float number3 = 0f, float number4 = 0f, int number5 = 0)
             {
                 Player.ForEach(p =>
@@ -282,12 +299,12 @@ namespace EternalLandPlugin.Game
                 }
                 else
                 {
-                    AX = x >= 0 && x < Width ? StartX + x : x < Width ? StartX : StartX + Width;
-                    AY = y >= 0 && x < Height ? StartY + y : y < Height ? StartY : StartY + Height;
+                    AX = x >= 0 && x <= Width ? StartX + x : x < Width ? StartX : StartX + Width;
+                    AY = y >= 0 && y <= Height ? StartY + y : y < Height ? StartY : StartY + Height;
                     return true;
                 }
             }
-            public void SetSpawn(int relativex, int relativey) => GetAbslute(relativex, relativey, out SpawnX, out SpawnY);
+            public void SetSpawn(int ax, int ay) => GetRelative(ax, ay, out SpawnX, out SpawnY);
             public void SendTileSquare(int whoAmi, int tileX, int tileY, int size, TileChangeType changeType = TileChangeType.None)
             {
                 int num = (size - 1) / 2;
@@ -349,6 +366,10 @@ namespace EternalLandPlugin.Game
             public List<int> Player = new List<int>();
             public List<Chest> Chest = new List<Chest>();
             public List<Sign> Sign = new List<Sign>();
+            public EItem[] Items = new EItem[401];
+            public Dictionary<string, Point> Warps = new Dictionary<string, Point>();
+            [IgnoreMember]
+            public List<Projectile> Proj = new List<Projectile>(new Projectile[1000]);
             //public Projectile[] Proj = new Projectile[1000];
             //public NPC[] Npc = new NPC[1000];
             //public ITile[,] Tile;
@@ -389,16 +410,29 @@ namespace EternalLandPlugin.Game
             }
             public void Initialize()
             {
-                InitializeMinecart();
-                InitializeWiring();
-                for (int j = 0; j < maxLiquid; j++)
+                try
                 {
-                    Liquid[j] = new Liquid();
+                    InitializeMinecart();
+                    InitializeWiring();
+                    for (int j = 0; j < maxLiquid; j++)
+                    {
+                        Liquid[j] = new Liquid();
+                    }
+                    for (int k = 0; k < 50000; k++)
+                    {
+                        LiquidBuffer[k] = new LiquidBuffer();
+                    }
+                    for (int i = 0; i < 400; i++)
+                    {
+                        Items[i] = new EItem();
+                    }
+                    for (int i = 0; i < 1000; i++)
+                    {
+                        Proj[i] = new Projectile();
+                    }
                 }
-                for (int k = 0; k < 50000; k++)
-                {
-                    LiquidBuffer[k] = new LiquidBuffer();
-                }
+                catch (Exception ex) { Log.Error(ex); }
+
             }
 
             #region 一些操作物块的方法
@@ -4099,7 +4133,7 @@ namespace EternalLandPlugin.Game
                         case 31:
                             if (flag)
                             {
-                                int num3 = Main.rand.Next(5);
+                                int num3 = Rand.Next(5);
                                 if (!WorldGen.shadowOrbSmashed)
                                 {
                                     num3 = 0;
@@ -4129,7 +4163,7 @@ namespace EternalLandPlugin.Game
                             }
                             else
                             {
-                                int num4 = Main.rand.Next(5);
+                                int num4 = Rand.Next(5);
                                 if (!WorldGen.shadowOrbSmashed)
                                 {
                                     num4 = 0;
@@ -5668,16 +5702,16 @@ namespace EternalLandPlugin.Game
                 }
                 if (type == 454)
                 {
-                    switch (Main.rand.Next(9))
+                    switch (Rand.Next(9))
                     {
                         case 2:
                         case 3:
                         case 4:
                             {
-                                int num13 = Main.rand.Next(10, 31);
+                                int num13 = Rand.Next(10, 31);
                                 while (num13 > 0)
                                 {
-                                    int num14 = Main.rand.Next(2, 11);
+                                    int num14 = Rand.Next(2, 11);
                                     if (num14 > num13)
                                     {
                                         num14 = num13;
@@ -5690,10 +5724,10 @@ namespace EternalLandPlugin.Game
                         case 5:
                         case 6:
                             {
-                                int num17 = Main.rand.Next(60, 80);
+                                int num17 = Rand.Next(60, 80);
                                 while (num17 > 0)
                                 {
-                                    int num18 = Main.rand.Next(3, 16);
+                                    int num18 = Rand.Next(3, 16);
                                     if (num18 > num17)
                                     {
                                         num18 = num17;
@@ -5706,10 +5740,10 @@ namespace EternalLandPlugin.Game
                             }
                         case 7:
                             {
-                                int num15 = Main.rand.Next(10, 31);
+                                int num15 = Rand.Next(10, 31);
                                 while (num15 > 0)
                                 {
-                                    int num16 = Main.rand.Next(2, 9);
+                                    int num16 = Rand.Next(2, 9);
                                     if (num16 > num15)
                                     {
                                         num16 = num15;
@@ -5717,11 +5751,11 @@ namespace EternalLandPlugin.Game
                                     num15 -= num16;
                                     NewItem(i * 16 - 10, j * 16 - 10, 52, 52, 72, num16);
                                 }
-                                if (Main.rand.Next(8) == 0)
+                                if (Rand.Next(8) == 0)
                                 {
                                     NewItem(i * 16, j * 16, 32, 32, 3532);
                                 }
-                                if (Main.rand.Next(8) == 0)
+                                if (Rand.Next(8) == 0)
                                 {
                                     NewItem(i * 16, j * 16, 32, 32, 3532);
                                 }
@@ -5733,7 +5767,7 @@ namespace EternalLandPlugin.Game
                                 int num9 = 100;
                                 while (num9 > 0)
                                 {
-                                    int num10 = Main.rand.Next(3, 16);
+                                    int num10 = Rand.Next(3, 16);
                                     if (num10 > num9)
                                     {
                                         num10 = num9;
@@ -5741,10 +5775,10 @@ namespace EternalLandPlugin.Game
                                     num9 -= num10;
                                     NewItem(i * 16 - 10, j * 16 - 10, 52, 52, 72, num10);
                                 }
-                                int num11 = Main.rand.Next(30, 91);
+                                int num11 = Rand.Next(30, 91);
                                 while (num11 > 0)
                                 {
-                                    int num12 = Main.rand.Next(7, 14);
+                                    int num12 = Rand.Next(7, 14);
                                     if (num12 > num11)
                                     {
                                         num12 = num11;
@@ -7192,7 +7226,7 @@ namespace EternalLandPlugin.Game
                     {
                         if (Main.netMode != 1)
                         {
-                            Projectile.NewProjectile(i * 16 + 16, j * 16 + 16, 0f, -12f, 518, 0, 0f, Main.myPlayer);
+                            NewProjectile(i * 16 + 16, j * 16 + 16, 0f, -12f, 518, 0, 0f, Main.myPlayer);
                         }
                     }
                     else if (genRand.Next(35) == 0 && Main.wallDungeon[this[i, j].wall] && (double)j > Main.worldSurface)
@@ -7201,9 +7235,9 @@ namespace EternalLandPlugin.Game
                     }
                     else if (Main.getGoodWorld && genRand.Next(4) == 0)
                     {
-                        Projectile.NewProjectile(i * 16 + 16, j * 16 + 8, (float)Main.rand.Next(-100, 101) * 0.002f, 0f, 28, 0, 0f, Terraria.Player.FindClosest(new Vector2(i * 16, j * 16), 16, 16));
+                        NewProjectile(i * 16 + 16, j * 16 + 8, (float)Rand.Next(-100, 101) * 0.002f, 0f, 28, 0, 0f, Terraria.Player.FindClosest(new Vector2(i * 16, j * 16), 16, 16));
                     }
-                    else if (genRand.Next(45) == 0 || (Main.rand.Next(45) == 0 && Main.expertMode))
+                    else if (genRand.Next(45) == 0 || (Rand.Next(45) == 0 && Main.expertMode))
                     {
                         if ((double)j < Main.worldSurface)
                         {
@@ -7414,13 +7448,13 @@ namespace EternalLandPlugin.Game
                             }
                         }
                     }
-                    else if (Main.netMode == 2 && Main.rand.Next(30) == 0)
+                    else if (Main.netMode == 2 && Rand.Next(30) == 0)
                     {
                         NewItem(i * 16, j * 16, 16, 16, 2997);
                     }
                     else
                     {
-                        int num13 = Main.rand.Next(7);
+                        int num13 = Rand.Next(7);
                         if (Main.expertMode)
                         {
                             num13--;
@@ -7429,17 +7463,17 @@ namespace EternalLandPlugin.Game
                         if (num13 == 0 && player.statLife < player.statLifeMax2)
                         {
                             NewItem(i * 16, j * 16, 16, 16, 58);
-                            if (Main.rand.Next(2) == 0)
+                            if (Rand.Next(2) == 0)
                             {
                                 NewItem(i * 16, j * 16, 16, 16, 58);
                             }
                             if (Main.expertMode)
                             {
-                                if (Main.rand.Next(2) == 0)
+                                if (Rand.Next(2) == 0)
                                 {
                                     NewItem(i * 16, j * 16, 16, 16, 58);
                                 }
-                                if (Main.rand.Next(2) == 0)
+                                if (Rand.Next(2) == 0)
                                 {
                                     NewItem(i * 16, j * 16, 16, 16, 58);
                                 }
@@ -7447,31 +7481,31 @@ namespace EternalLandPlugin.Game
                         }
                         else if (num13 == 1)
                         {
-                            int num14 = Main.rand.Next(2, 7);
+                            int num14 = Rand.Next(2, 7);
                             if (Main.expertMode)
                             {
-                                num14 += Main.rand.Next(1, 7);
+                                num14 += Rand.Next(1, 7);
                             }
                             int type2 = 8;
                             int type3 = 282;
                             if (player.ZoneHallow)
                             {
-                                num14 += Main.rand.Next(2, 7);
+                                num14 += Rand.Next(2, 7);
                                 type2 = 4387;
                             }
                             else if ((num4 >= 22 && num4 <= 24) || player.ZoneCrimson)
                             {
-                                num14 += Main.rand.Next(2, 7);
+                                num14 += Rand.Next(2, 7);
                                 type2 = 4386;
                             }
                             else if ((num4 >= 16 && num4 <= 18) || player.ZoneCorrupt)
                             {
-                                num14 += Main.rand.Next(2, 7);
+                                num14 += Rand.Next(2, 7);
                                 type2 = 4385;
                             }
                             else if (num4 >= 7 && num4 <= 9)
                             {
-                                num14 += Main.rand.Next(2, 7);
+                                num14 += Rand.Next(2, 7);
                                 type2 = 4388;
                             }
                             else if (num4 >= 4 && num4 <= 6)
@@ -7481,7 +7515,7 @@ namespace EternalLandPlugin.Game
                             }
                             else if (num4 >= 34 && num4 <= 36)
                             {
-                                num14 += Main.rand.Next(2, 7);
+                                num14 += Rand.Next(2, 7);
                                 type2 = 4383;
                             }
                             if (this[i, j].liquid > 0)
@@ -7495,7 +7529,7 @@ namespace EternalLandPlugin.Game
                         }
                         else if (num13 == 2)
                         {
-                            int stack = Main.rand.Next(10, 21);
+                            int stack = Rand.Next(10, 21);
                             int type4 = 40;
                             if ((double)j < Main.rockLayer && genRand.Next(2) == 0)
                             {
@@ -7507,7 +7541,7 @@ namespace EternalLandPlugin.Game
                             }
                             else if (Main.hardMode)
                             {
-                                type4 = ((Main.rand.Next(2) != 0) ? 47 : ((WorldGen.SavedOreTiers.Silver != 168) ? 278 : 4915));
+                                type4 = ((Rand.Next(2) != 0) ? 47 : ((WorldGen.SavedOreTiers.Silver != 168) ? 278 : 4915));
                             }
                             NewItem(i * 16, j * 16, 16, 16, type4, stack);
                         }
@@ -7519,7 +7553,7 @@ namespace EternalLandPlugin.Game
                                 type5 = 188;
                             }
                             int num15 = 1;
-                            if (Main.expertMode && Main.rand.Next(3) != 0)
+                            if (Main.expertMode && Rand.Next(3) != 0)
                             {
                                 num15++;
                             }
@@ -7532,16 +7566,16 @@ namespace EternalLandPlugin.Game
                             {
                                 type6 = 4423;
                             }
-                            int num16 = Main.rand.Next(4) + 1;
+                            int num16 = Rand.Next(4) + 1;
                             if (Main.expertMode)
                             {
-                                num16 += Main.rand.Next(4);
+                                num16 += Rand.Next(4);
                             }
                             NewItem(i * 16, j * 16, 16, 16, type6, num16);
                         }
                         else if ((num13 == 4 || num13 == 5) && j < Main.UnderworldLayer && !Main.hardMode)
                         {
-                            int stack2 = Main.rand.Next(20, 41);
+                            int stack2 = Rand.Next(20, 41);
                             NewItem(i * 16, j * 16, 16, 16, 965, stack2);
                         }
                         else
@@ -7559,40 +7593,40 @@ namespace EternalLandPlugin.Game
                             {
                                 num17 *= 1.25f;
                             }
-                            num17 *= 1f + (float)Main.rand.Next(-20, 21) * 0.01f;
-                            if (Main.rand.Next(4) == 0)
+                            num17 *= 1f + (float)Rand.Next(-20, 21) * 0.01f;
+                            if (Rand.Next(4) == 0)
                             {
-                                num17 *= 1f + (float)Main.rand.Next(5, 11) * 0.01f;
+                                num17 *= 1f + (float)Rand.Next(5, 11) * 0.01f;
                             }
-                            if (Main.rand.Next(8) == 0)
+                            if (Rand.Next(8) == 0)
                             {
-                                num17 *= 1f + (float)Main.rand.Next(10, 21) * 0.01f;
+                                num17 *= 1f + (float)Rand.Next(10, 21) * 0.01f;
                             }
-                            if (Main.rand.Next(12) == 0)
+                            if (Rand.Next(12) == 0)
                             {
-                                num17 *= 1f + (float)Main.rand.Next(20, 41) * 0.01f;
+                                num17 *= 1f + (float)Rand.Next(20, 41) * 0.01f;
                             }
-                            if (Main.rand.Next(16) == 0)
+                            if (Rand.Next(16) == 0)
                             {
-                                num17 *= 1f + (float)Main.rand.Next(40, 81) * 0.01f;
+                                num17 *= 1f + (float)Rand.Next(40, 81) * 0.01f;
                             }
-                            if (Main.rand.Next(20) == 0)
+                            if (Rand.Next(20) == 0)
                             {
-                                num17 *= 1f + (float)Main.rand.Next(50, 101) * 0.01f;
+                                num17 *= 1f + (float)Rand.Next(50, 101) * 0.01f;
                             }
                             if (Main.expertMode)
                             {
                                 num17 *= 2.5f;
                             }
-                            if (Main.expertMode && Main.rand.Next(2) == 0)
+                            if (Main.expertMode && Rand.Next(2) == 0)
                             {
                                 num17 *= 1.25f;
                             }
-                            if (Main.expertMode && Main.rand.Next(3) == 0)
+                            if (Main.expertMode && Rand.Next(3) == 0)
                             {
                                 num17 *= 1.5f;
                             }
-                            if (Main.expertMode && Main.rand.Next(4) == 0)
+                            if (Main.expertMode && Rand.Next(4) == 0)
                             {
                                 num17 *= 1.75f;
                             }
@@ -7650,13 +7684,13 @@ namespace EternalLandPlugin.Game
                                 if (num17 > 1000000f)
                                 {
                                     int num18 = (int)(num17 / 1000000f);
-                                    if (num18 > 50 && Main.rand.Next(2) == 0)
+                                    if (num18 > 50 && Rand.Next(2) == 0)
                                     {
-                                        num18 /= Main.rand.Next(3) + 1;
+                                        num18 /= Rand.Next(3) + 1;
                                     }
-                                    if (Main.rand.Next(2) == 0)
+                                    if (Rand.Next(2) == 0)
                                     {
-                                        num18 /= Main.rand.Next(3) + 1;
+                                        num18 /= Rand.Next(3) + 1;
                                     }
                                     num17 -= (float)(1000000 * num18);
                                     NewItem(i * 16, j * 16, 16, 16, 74, num18);
@@ -7665,13 +7699,13 @@ namespace EternalLandPlugin.Game
                                 if (num17 > 10000f)
                                 {
                                     int num19 = (int)(num17 / 10000f);
-                                    if (num19 > 50 && Main.rand.Next(2) == 0)
+                                    if (num19 > 50 && Rand.Next(2) == 0)
                                     {
-                                        num19 /= Main.rand.Next(3) + 1;
+                                        num19 /= Rand.Next(3) + 1;
                                     }
-                                    if (Main.rand.Next(2) == 0)
+                                    if (Rand.Next(2) == 0)
                                     {
-                                        num19 /= Main.rand.Next(3) + 1;
+                                        num19 /= Rand.Next(3) + 1;
                                     }
                                     num17 -= (float)(10000 * num19);
                                     NewItem(i * 16, j * 16, 16, 16, 73, num19);
@@ -7680,26 +7714,26 @@ namespace EternalLandPlugin.Game
                                 if (num17 > 100f)
                                 {
                                     int num20 = (int)(num17 / 100f);
-                                    if (num20 > 50 && Main.rand.Next(2) == 0)
+                                    if (num20 > 50 && Rand.Next(2) == 0)
                                     {
-                                        num20 /= Main.rand.Next(3) + 1;
+                                        num20 /= Rand.Next(3) + 1;
                                     }
-                                    if (Main.rand.Next(2) == 0)
+                                    if (Rand.Next(2) == 0)
                                     {
-                                        num20 /= Main.rand.Next(3) + 1;
+                                        num20 /= Rand.Next(3) + 1;
                                     }
                                     num17 -= (float)(100 * num20);
                                     NewItem(i * 16, j * 16, 16, 16, 72, num20);
                                     continue;
                                 }
                                 int num21 = (int)num17;
-                                if (num21 > 50 && Main.rand.Next(2) == 0)
+                                if (num21 > 50 && Rand.Next(2) == 0)
                                 {
-                                    num21 /= Main.rand.Next(3) + 1;
+                                    num21 /= Rand.Next(3) + 1;
                                 }
-                                if (Main.rand.Next(2) == 0)
+                                if (Rand.Next(2) == 0)
                                 {
-                                    num21 /= Main.rand.Next(4) + 1;
+                                    num21 /= Rand.Next(4) + 1;
                                 }
                                 if (num21 < 1)
                                 {
@@ -8655,11 +8689,11 @@ namespace EternalLandPlugin.Game
                 }
                 if (type == 138 && !WorldGen.gen && Main.netMode != 1)
                 {
-                    Projectile.NewProjectile((float)(num2 * 16) + 15.5f, num6 * 16 + 16, 0f, 0f, 99, 70, 10f, Main.myPlayer);
+                    NewProjectile((float)(num2 * 16) + 15.5f, num6 * 16 + 16, 0f, 0f, 99, 70, 10f, Main.myPlayer);
                 }
                 if (type == 484 && !WorldGen.gen && Main.netMode != 1)
                 {
-                    Projectile.NewProjectile((float)(num2 * 16) + 15.5f, num6 * 16 + 16, 0f, 0f, 727, 70, 10f, Main.myPlayer);
+                    NewProjectile((float)(num2 * 16) + 15.5f, num6 * 16 + 16, 0f, 0f, 727, 70, 10f, Main.myPlayer);
                 }
                 destroyObject = false;
                 for (int num14 = num2 - 1; num14 < num2 + 3; num14++)
@@ -8941,7 +8975,7 @@ namespace EternalLandPlugin.Game
                 }
                 if (type == 444 && Main.netMode != 1 && !flag6)
                 {
-                    Projectile.NewProjectile(num2 * 16 + 16, num3 * 16 + 16, 0f, 0f, 655, 0, 0f, Main.myPlayer);
+                    NewProjectile(num2 * 16 + 16, num3 * 16 + 16, 0f, 0f, 655, 0, 0f, Main.myPlayer);
                 }
                 if (num13 != 0)
                 {
@@ -12386,7 +12420,7 @@ namespace EternalLandPlugin.Game
                             case 187:
                                 if (frameX >= 918 && frameX <= 970)
                                 {
-                                    if (Main.rand.Next(50) == 0)
+                                    if (Rand.Next(50) == 0)
                                     {
                                         NewItem(i * 16, j * 16, 32, 32, 4144);
                                     }
@@ -13033,7 +13067,7 @@ namespace EternalLandPlugin.Game
                 }
                 if (Main.netMode != 1)
                 {
-                    int num13 = Main.rand.Next(2) + 1;
+                    int num13 = Rand.Next(2) + 1;
                     for (int l = 0; l < num13; l++)
                     {
                         NPC.SpawnOnPlayer(Terraria.Player.FindClosest(new Vector2(i * 16, j * 16), 16, 16), 82);
@@ -18265,8 +18299,8 @@ namespace EternalLandPlugin.Game
                                                                 {
                                                                     WorldGen.GetSandfallProjData(num, out int projType, out int dmg);
                                                                     tile.ClearTile();
-                                                                    int num48 = Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, projType, dmg, 0f, Main.myPlayer);
-                                                                    Main.projectile[num48].ai[0] = 1f;
+                                                                    int num48 = NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, projType, dmg, 0f, Main.myPlayer);
+                                                                    Proj[num48].ai[0] = 1f;
                                                                     SquareTileFrame(i, j);
                                                                 }
                                                             }
@@ -18278,7 +18312,7 @@ namespace EternalLandPlugin.Game
                                                             bool flag13 = false;
                                                             for (int k = 0; k < 1000; k++)
                                                             {
-                                                                if (Main.projectile[k].active && Main.projectile[k].owner == Main.myPlayer && Main.projectile[k].type == projType2 && Math.Abs(Main.projectile[k].timeLeft - 3600) < 60 && Main.projectile[k].Distance(new Vector2(i * 16 + 8, j * 16 + 10)) < 4f)
+                                                                if (Proj[k] != null && Proj[k].active && Proj[k].owner == Main.myPlayer && Proj[k].type == projType2 && Math.Abs(Proj[k].timeLeft - 3600) < 60 && Proj[k].Distance(new Vector2(i * 16 + 8, j * 16 + 10)) < 4f)
                                                                 {
                                                                     flag13 = true;
                                                                     break;
@@ -18286,10 +18320,10 @@ namespace EternalLandPlugin.Game
                                                             }
                                                             if (!flag13)
                                                             {
-                                                                int num49 = Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 2.5f, projType2, dmg2, 0f, Main.myPlayer);
-                                                                Main.projectile[num49].velocity.Y = 0.5f;
-                                                                Main.projectile[num49].position.Y += 2f;
-                                                                Main.projectile[num49].netUpdate = true;
+                                                                int num49 = NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 2.5f, projType2, dmg2, 0f, Main.myPlayer);
+                                                                Proj[num49].velocity.Y = 0.5f;
+                                                                Proj[num49].position.Y += 2f;
+                                                                //Proj[num49].netUpdate = true;
                                                             }
                                                             SendTileSquare(-1, i, j, 1);
                                                             SquareTileFrame(i, j);
@@ -23336,7 +23370,7 @@ namespace EternalLandPlugin.Game
                     {
                         flag9 = true;
                     }
-                    num35 = ((!flag9) ? TileObjectPreviewData.randomCache.Random : Main.rand.Next(tileData.RandomStyleRange));
+                    num35 = ((!flag9) ? TileObjectPreviewData.randomCache.Random : Rand.Next(tileData.RandomStyleRange));
                 }
                 if (onlyCheck)
                 {
@@ -24169,7 +24203,7 @@ namespace EternalLandPlugin.Game
                 bool flag = false;
                 if (Main.getGoodWorld && WorldGen.genRand.Next(15) == 0)
                 {
-                    Projectile.NewProjectile(x * 16, y * 16, (float)Rand.Next(-100, 101) * 0.002f, 0f, 28, 0, 0f, Terraria.Player.FindClosest(new Vector2(x * 16, y * 16), 16, 16));
+                    NewProjectile(x * 16, y * 16, (float)Rand.Next(-100, 101) * 0.002f, 0f, 28, 0, 0f, Terraria.Player.FindClosest(new Vector2(x * 16, y * 16), 16, 16));
                 }
                 else if (WorldGen.genRand.Next(1000) == 0 && treeType == TreeTypes.Forest)
                 {
@@ -24325,7 +24359,7 @@ namespace EternalLandPlugin.Game
                 else if (WorldGen.genRand.Next(40) == 0 && treeType == TreeTypes.Jungle)
                 {
                     flag = true;
-                    Projectile.NewProjectile(x * 16 + 8, (y - 1) * 16, 0f, 0f, 655, 0, 0f, Main.myPlayer);
+                    NewProjectile(x * 16 + 8, (y - 1) * 16, 0f, 0f, 655, 0, 0f, Main.myPlayer);
                 }
                 else if (WorldGen.genRand.Next(20) == 0 && (treeType == TreeTypes.Forest || treeType == TreeTypes.Hallowed) && !Main.raining && !NPC.TooWindyForButterflies && Main.dayTime)
                 {
@@ -24522,8 +24556,8 @@ namespace EternalLandPlugin.Game
                             item.netDefaults(num10);
                             item.Prefix(frameX2);
                             int num11 = NewItem(i * 16, j * 16, 16, 16, num10, 1, noBroadcast: true);
-                            item.position = Main.item[num11].position;
-                            Main.item[num11] = item;
+                            item.position = Items[num11].position;
+                            Items[num11] = item;
                             SendDataToPlayer(21, -1, -1, null, num11);
                         }
                         frameX = this[num7, j].frameX;
@@ -24643,8 +24677,8 @@ namespace EternalLandPlugin.Game
                         if (tile2.active() && WorldGen.genRand.Next(maxValue) == 0 && tile2.type == 57 && !SolidTile(num16, num17 + 1))
                         {
                             KillTile(num16, num17, fail: false, effectOnly: false, noItem: true);
-                            int num18 = Projectile.NewProjectile(num16 * 16 + 8, num17 * 16 + 8, 0f, 0.41f, 40, 15, 0f, Main.myPlayer);
-                            Main.projectile[num18].netUpdate = true;
+                            int num18 = NewProjectile(num16 * 16 + 8, num17 * 16 + 8, 0f, 0.41f, 40, 15, 0f, Main.myPlayer);
+                            //Proj[num18].netUpdate = true;
                         }
                     }
                 }
@@ -24698,12 +24732,12 @@ namespace EternalLandPlugin.Game
                     int damage = 20;
                     if (Main.netMode == 0)
                     {
-                        Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, type, damage, 0f, Main.myPlayer);
+                        NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, type, damage, 0f, Main.myPlayer);
                     }
                     else if (Main.netMode == 2)
                     {
-                        int num22 = Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, type, damage, 0f, Main.myPlayer);
-                        Main.projectile[num22].netUpdate = true;
+                        int num22 = NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0.41f, type, damage, 0f, Main.myPlayer);
+                        //Proj[num22].netUpdate = true;
                     }
                 }
                 if (!CheckTileBreakability2_ShouldTileSurvive(i, j))
@@ -24749,15 +24783,16 @@ namespace EternalLandPlugin.Game
                     if (dropItem > 0)
                     {
                         int num = NewItem(x * 16, y * 16, 16, 16, dropItem, dropItemStack, noBroadcast: false, -1);
-                        Main.item[num].TryCombiningIntoNearbyItems(num);
+                        Items[num].TryCombiningIntoNearbyItems(num, this);
                     }
                     if (secondaryItem > 0)
                     {
                         int num2 = NewItem(x * 16, y * 16, 16, 16, secondaryItem, secondaryItemStack, noBroadcast: false, -1);
-                        Main.item[num2].TryCombiningIntoNearbyItems(num2);
+                        Items[num2].TryCombiningIntoNearbyItems(num2, this);
                     }
                 }
             }
+            public int numberOfNewItems = 0;
             public void KillTile_DropBait(int i, int j, ITile tileCache)
             {
                 int num = -1;
@@ -24859,10 +24894,14 @@ namespace EternalLandPlugin.Game
                 if (num2 > 0 && NPC.CountNPCS(377) < 5 && WorldGen.genRand.Next(num2) == 0)
                 {
                     int type2 = 377;
-                    if (Terraria.Player.GetClosestRollLuck(i, j, NPC.goldCritterChance) == 0f)
+                    try
                     {
-                        type2 = 446;
+                        if (Terraria.Player.GetClosestRollLuck(i, j, NPC.goldCritterChance) == 0f)
+                        {
+                            type2 = 446;
+                        }
                     }
+                    catch { }
                     int num7 = NPC.NewNPC(i * 16 + 10, j * 16, type2);
                     Main.npc[num7].TargetClosest();
                     Main.npc[num7].velocity.Y = (float)WorldGen.genRand.Next(-50, -21) * 0.1f;
@@ -25103,6 +25142,260 @@ namespace EternalLandPlugin.Game
                 }
                 return false;
             }
+            public int FindOldestProjectile()
+            {
+                int result = 1000;
+                int num = 9999999;
+                for (int i = 0; i < 1000; i++)
+                {
+                    if (!Proj[i].netImportant && Proj[i].timeLeft < num)
+                    {
+                        result = i;
+                        num = Proj[i].timeLeft;
+                    }
+                }
+                return result;
+            }
+            public int NewProjectile(float X, float Y, float SpeedX, float SpeedY, int Type, int Damage, float KnockBack, int Owner = 255, float ai0 = 0f, float ai1 = 0f)
+            {
+                int num = 1000;
+                for (int i = 0; i < 1000; i++)
+                {
+                    if (!Proj[i].active)
+                    {
+                        num = i;
+                        break;
+                    }
+                }
+                if (num == 1000)
+                {
+                    num = FindOldestProjectile();
+                }
+                Projectile projectile = new Projectile();
+                projectile.SetDefault(Type);
+                projectile.position.X = X - (float)projectile.width * 0.5f;
+                projectile.position.Y = Y - (float)projectile.height * 0.5f;
+                projectile.owner = Owner;
+                projectile.velocity.X = SpeedX;
+                projectile.velocity.Y = SpeedY;
+                projectile.damage = Damage;
+                projectile.knockBack = KnockBack;
+                projectile.identity = num;
+                projectile.gfxOffY = 0f;
+                projectile.stepSpeed = 1f;
+                projectile.wet = WetCollision(projectile.position, projectile.width, projectile.height);
+                if (projectile.ignoreWater)
+                {
+                    projectile.wet = false;
+                }
+                projectile.honeyWet = Collision.honey;
+                //Main.projectileIdentity[Owner, num] = num;
+                if (projectile.aiStyle == 1)
+                {
+                    while (projectile.velocity.X >= 16f || projectile.velocity.X <= -16f || projectile.velocity.Y >= 16f || projectile.velocity.Y < -16f)
+                    {
+                        projectile.velocity.X *= 0.97f;
+                        projectile.velocity.Y *= 0.97f;
+                    }
+                }
+                if (Owner == Main.myPlayer)
+                {
+                    switch (Type)
+                    {
+                        case 206:
+                            projectile.ai[0] = (float)Rand.Next(-100, 101) * 0.0005f;
+                            projectile.ai[1] = (float)Rand.Next(-100, 101) * 0.0005f;
+                            break;
+                        case 335:
+                            projectile.ai[1] = Rand.Next(4);
+                            break;
+                        case 358:
+                            projectile.ai[1] = (float)Rand.Next(10, 31) * 0.1f;
+                            break;
+                        case 406:
+                            projectile.ai[1] = (float)Rand.Next(10, 21) * 0.1f;
+                            break;
+                        default:
+                            projectile.ai[0] = ai0;
+                            projectile.ai[1] = ai1;
+                            break;
+                    }
+                }
+                if (Type == 434)
+                {
+                    projectile.ai[0] = projectile.position.X;
+                    projectile.ai[1] = projectile.position.Y;
+                }
+                if (Type > 0 && Type < 950)
+                {
+                    if (ProjectileID.Sets.NeedsUUID[Type])
+                    {
+                        projectile.projUUID = projectile.identity;
+                    }
+                    if (ProjectileID.Sets.StardustDragon[Type])
+                    {
+                        int num2 = Proj[(int)projectile.ai[0]].projUUID;
+                        if (num2 >= 0)
+                        {
+                            projectile.ai[0] = num2;
+                        }
+                    }
+                }
+                if (Main.netMode != 0 && Owner == Main.myPlayer)
+                {
+                    NetMessage.SendData(27, -1, -1, null, num);
+                }
+                if (Owner == Main.myPlayer)
+                {
+                    if (ProjectileID.Sets.IsAGolfBall[Type] && Damage <= 0)
+                    {
+                        int num3 = 0;
+                        int num4 = 0;
+                        int num5 = 99999999;
+                        for (int j = 0; j < 1000; j++)
+                        {
+                            if (Proj[j].active && ProjectileID.Sets.IsAGolfBall[Proj[j].type] && Proj[j].owner == Owner && Proj[j].damage <= 0)
+                            {
+                                num3++;
+                                if (num5 > Proj[j].timeLeft)
+                                {
+                                    num4 = j;
+                                    num5 = Proj[j].timeLeft;
+                                }
+                            }
+                        }
+                        if (num3 > 10)
+                        {
+                            Proj[num4].Kill();
+                        }
+                    }
+                    if (Type == 28)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 516)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 519)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 29)
+                    {
+                        projectile.timeLeft = 300;
+                    }
+                    if (Type == 470)
+                    {
+                        projectile.timeLeft = 300;
+                    }
+                    if (Type == 637)
+                    {
+                        projectile.timeLeft = 300;
+                    }
+                    if (Type == 30)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 517)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 37)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 773)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 75)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 133)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 136)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 139)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 142)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 397)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 419)
+                    {
+                        projectile.timeLeft = 600;
+                    }
+                    if (Type == 420)
+                    {
+                        projectile.timeLeft = 600;
+                    }
+                    if (Type == 421)
+                    {
+                        projectile.timeLeft = 600;
+                    }
+                    if (Type == 422)
+                    {
+                        projectile.timeLeft = 600;
+                    }
+                    if (Type == 588)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                    if (Type == 779)
+                    {
+                        projectile.timeLeft = 60;
+                    }
+                    if (Type == 783)
+                    {
+                        projectile.timeLeft = 60;
+                    }
+                    if (Type == 862 || Type == 863)
+                    {
+                        projectile.timeLeft = 60;
+                    }
+                    if (Type == 443)
+                    {
+                        projectile.timeLeft = 300;
+                    }
+                    if (Type == 681)
+                    {
+                        projectile.timeLeft = 600;
+                    }
+                    if (Type == 684)
+                    {
+                        projectile.timeLeft = 60;
+                    }
+                    if (Type == 706)
+                    {
+                        projectile.timeLeft = 120;
+                    }
+                    if (Type == 680 && Main.player[projectile.owner].setSquireT2)
+                    {
+                        projectile.penetrate = 7;
+                    }
+                    if (Type == 777 || Type == 781 || Type == 794 || Type == 797 || Type == 800 || Type == 785 || Type == 788 || Type == 791 || Type == 903 || Type == 904 || Type == 905 || Type == 906 || Type == 910 || Type == 911)
+                    {
+                        projectile.timeLeft = 180;
+                    }
+                }
+                if (Type == 249)
+                {
+                    projectile.frame = Rand.Next(5);
+                }
+                return num;
+            }
             public int NewItem(int X, int Y, int Width, int Height, int Type, int Stack = 1, bool noBroadcast = false, int pfix = 0, bool noGrabDelay = false, bool reverseLookup = false)
             {
                 if (WorldGen.gen)
@@ -25135,22 +25428,17 @@ namespace EternalLandPlugin.Game
                         Type = 1868;
                     }
                 }
-                if (Type > 0 && Item.cachedItemSpawnsByType[Type] != -1)
-                {
-                    Item.cachedItemSpawnsByType[Type] += Stack;
-                    return 400;
-                }
-                Main.item[400] = new Item();
+                Items[400] = new EItem();
                 int num = 400;
                 if (Main.netMode != 1)
                 {
-                    num = Item.PickAnItemSlotToSpawnItemOn(reverseLookup, num);
+                    num = PickAnItemSlotToSpawnItemOn(reverseLookup, num);
                 }
-                Main.timeItemSlotCannotBeReusedFor[num] = 0;
-                Main.item[num] = new Item();
-                Item item = Main.item[num];
-                item.SetDefaults(Type);
-                item.Prefix(pfix);
+                timeItemSlotCannotBeReusedFor[num] = 0;
+                Items[num] = new EItem();
+                EItem item = Items[num];
+                item.type = Type;
+                item.prefix = pfix;
                 item.stack = Stack;
                 item.position.X = X + Width / 2 - item.width / 2;
                 item.position.Y = Y + Height / 2 - item.height / 2;
@@ -25168,15 +25456,63 @@ namespace EternalLandPlugin.Game
                 }
                 item.active = true;
                 item.timeSinceItemSpawned = ItemID.Sets.NewItemSpawnPriority[item.type];
-                Item.numberOfNewItems++;
-                if (Main.netMode == 2 && !noBroadcast)
+                numberOfNewItems++;
+                if (!noBroadcast)
                 {
                     GetAllPlayers().ForEach(e =>
                     {
-                        e.SendRawData(new EternalLandPlugin.Net.RawDataWriter().SetType(PacketTypes.ItemDrop).PackInt16((short)num).PackVector2(item.position).PackVector2(item.velocity).PackInt16((short)item.stack).PackByte(item.prefix).PackByte((byte)noGrabDelay.ToInt()).PackInt16((short)item.netID).GetByteData());
+                        e.SendRawData(new RawDataWriter().SetType(PacketTypes.UpdateItemDrop).PackInt16((short)num).PackVector2(item.position).PackVector2(item.velocity).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackByte((byte)noGrabDelay.ToInt()).PackInt16((short)item.type).GetByteData());
                     });
                 }
                 return num;
+            }
+            public int[] timeItemSlotCannotBeReusedFor = new int[401];
+            public int PickAnItemSlotToSpawnItemOn(bool reverseLookup, int nextItem)
+            {
+                int num = 0;
+                int num2 = 400;
+                int num3 = 1;
+                if (reverseLookup)
+                {
+                    num = 399;
+                    num2 = -1;
+                    num3 = -1;
+                }
+                bool flag = false;
+                for (int i = num; i != num2; i += num3)
+                {
+                    if (!Items[i].active && timeItemSlotCannotBeReusedFor[i] == 0)
+                    {
+                        nextItem = i;
+                        flag = true;
+                        break;
+                    }
+                }
+                if (!flag)
+                {
+                    int num4 = 0;
+                    for (int j = 0; j < 400; j++)
+                    {
+                        if (timeItemSlotCannotBeReusedFor[j] == 0 && Items[j].timeSinceItemSpawned > num4)
+                        {
+                            num4 = Items[j].timeSinceItemSpawned;
+                            nextItem = j;
+                            flag = true;
+                        }
+                    }
+                    if (!flag)
+                    {
+                        for (int k = 0; k < 400; k++)
+                        {
+                            if (Items[k].timeSinceItemSpawned - timeItemSlotCannotBeReusedFor[k] > num4)
+                            {
+                                num4 = Items[k].timeSinceItemSpawned - timeItemSlotCannotBeReusedFor[k];
+                                nextItem = k;
+                            }
+                        }
+                    }
+                }
+                return nextItem;
             }
             public bool WetCollision(Vector2 Position, int Width, int Height)
             {
@@ -28155,7 +28491,7 @@ namespace EternalLandPlugin.Game
                     {
                         flag7 = false;
                     }
-                    flag7 = (Main.rand.NextFloat() < (float)num4 / (float)num3);
+                    flag7 = (Rand.NextFloat() < (float)num4 / (float)num3);
                 }
                 if (flag5)
                 {
@@ -28720,9 +29056,9 @@ namespace EternalLandPlugin.Game
                     }
                     if (num51 != -1 && CheckMech(num48, num49, 10))
                     {
-                        float num55 = 12f + (float)Main.rand.Next(450) * 0.01f;
-                        float num56 = Main.rand.Next(85, 105);
-                        float num57 = Main.rand.Next(-35, 11);
+                        float num55 = 12f + (float)Rand.Next(450) * 0.01f;
+                        float num56 = Rand.Next(85, 105);
+                        float num57 = Rand.Next(-35, 11);
                         int type2 = 166;
                         int damage = 0;
                         float knockBack = 0f;
@@ -28742,7 +29078,7 @@ namespace EternalLandPlugin.Game
                         num60 = num55 / num60;
                         num58 *= num60;
                         num59 *= num60;
-                        Projectile.NewProjectile(vector.X, vector.Y, num58, num59, type2, damage, knockBack, CurrentUser);
+                        NewProjectile(vector.X, vector.Y, num58, num59, type2, damage, knockBack, CurrentUser);
                     }
                     return;
                 }
@@ -28817,7 +29153,7 @@ namespace EternalLandPlugin.Game
                 if (type == 10)
                 {
                     int num69 = 1;
-                    if (Main.rand.Next(2) == 0)
+                    if (Rand.Next(2) == 0)
                     {
                         num69 = -1;
                     }
@@ -28847,7 +29183,7 @@ namespace EternalLandPlugin.Game
                     SkipWire(i, num70 + 1);
                     if (CheckMech(i, num70, 60))
                     {
-                        Projectile.NewProjectile(i * 16 + 8, num70 * 16 + 12, 0f, 0f, 733, 0, 0f, Main.myPlayer);
+                        NewProjectile(i * 16 + 8, num70 * 16 + 12, 0f, 0f, 733, 0, 0f, Main.myPlayer);
                     }
                     return;
                 }
@@ -28880,7 +29216,7 @@ namespace EternalLandPlugin.Game
                             bool flag5 = false;
                             for (int num79 = 0; num79 < 1000; num79++)
                             {
-                                if (Main.projectile[num79].active && Main.projectile[num79].aiStyle == 73 && Main.projectile[num79].ai[0] == (float)num78 && Main.projectile[num79].ai[1] == (float)num77)
+                                if (Proj[num79].active && Proj[num79].aiStyle == 73 && Proj[num79].ai[0] == (float)num78 && Proj[num79].ai[1] == (float)num77)
                                 {
                                     flag5 = true;
                                     break;
@@ -28888,7 +29224,7 @@ namespace EternalLandPlugin.Game
                             }
                             if (!flag5)
                             {
-                                Projectile.NewProjectile(num78 * 16 + 8, num77 * 16 + 2, 0f, 0f, 419 + Main.rand.Next(4), 0, 0f, Main.myPlayer, num78, num77);
+                                NewProjectile(num78 * 16 + 8, num77 * 16 + 2, 0f, 0f, 419 + Rand.Next(4), 0, 0f, Main.myPlayer, num78, num77);
                             }
                             break;
                         }
@@ -29274,9 +29610,9 @@ namespace EternalLandPlugin.Game
                                         int num162 = 200;
                                         for (int num163 = 0; num163 < 1000; num163++)
                                         {
-                                            if (Main.projectile[num163].active && Main.projectile[num163].type == num159)
+                                            if (Proj[num163].active && Proj[num163].type == num159)
                                             {
-                                                float num164 = (new Vector2(i * 16 + 8, j * 18 + 8) - Main.projectile[num163].Center).Length();
+                                                float num164 = (new MapTools.Vector2(i * 16 + 8, j * 18 + 8) - Proj[num163].Center).Length();
                                                 num162 = ((!(num164 < 50f)) ? ((!(num164 < 100f)) ? ((!(num164 < 200f)) ? ((!(num164 < 300f)) ? ((!(num164 < 400f)) ? ((!(num164 < 500f)) ? ((!(num164 < 700f)) ? ((!(num164 < 900f)) ? ((!(num164 < 1200f)) ? (num162 - 1) : (num162 - 2)) : (num162 - 3)) : (num162 - 4)) : (num162 - 5)) : (num162 - 6)) : (num162 - 8)) : (num162 - 10)) : (num162 - 15)) : (num162 - 50));
                                             }
                                         }
@@ -29306,8 +29642,8 @@ namespace EternalLandPlugin.Game
                                                     num166 = 0;
                                                     break;
                                             }
-                                            speedX = (float)(4 * num165) + (float)Main.rand.Next(-20 + ((num165 == 1) ? 20 : 0), 21 - ((num165 == -1) ? 20 : 0)) * 0.05f;
-                                            speedY = (float)(4 * num166) + (float)Main.rand.Next(-20 + ((num166 == 1) ? 20 : 0), 21 - ((num166 == -1) ? 20 : 0)) * 0.05f;
+                                            speedX = (float)(4 * num165) + (float)Rand.Next(-20 + ((num165 == 1) ? 20 : 0), 21 - ((num165 == -1) ? 20 : 0)) * 0.05f;
+                                            speedY = (float)(4 * num166) + (float)Rand.Next(-20 + ((num166 == 1) ? 20 : 0), 21 - ((num166 == -1) ? 20 : 0)) * 0.05f;
                                             vector3 = new Vector2(i * 16 + 8 + 14 * num165, j * 16 + 8 + 14 * num166);
                                         }
                                         break;
@@ -29405,20 +29741,20 @@ namespace EternalLandPlugin.Game
                                         int num171 = 200;
                                         for (int num172 = 0; num172 < 1000; num172++)
                                         {
-                                            if (Main.projectile[num172].active && Main.projectile[num172].type == num159)
+                                            if (Proj[num172].active && Proj[num172].type == num159)
                                             {
-                                                float num173 = (new Vector2(i * 16 + 8, j * 18 + 8) - Main.projectile[num172].Center).Length();
+                                                float num173 = (new MapTools.Vector2(i * 16 + 8, j * 18 + 8) - Proj[num172].Center).Length();
                                                 num171 = ((!(num173 < 50f)) ? ((!(num173 < 100f)) ? ((!(num173 < 200f)) ? ((!(num173 < 300f)) ? ((!(num173 < 400f)) ? ((!(num173 < 500f)) ? ((!(num173 < 700f)) ? ((!(num173 < 900f)) ? ((!(num173 < 1200f)) ? (num171 - 1) : (num171 - 2)) : (num171 - 3)) : (num171 - 4)) : (num171 - 5)) : (num171 - 6)) : (num171 - 8)) : (num171 - 10)) : (num171 - 15)) : (num171 - 50));
                                             }
                                         }
                                         if (num171 > 0)
                                         {
-                                            speedX = (float)Main.rand.Next(-20, 21) * 0.05f;
-                                            speedY = 4f + (float)Main.rand.Next(0, 21) * 0.05f;
+                                            speedX = (float)Rand.Next(-20, 21) * 0.05f;
+                                            speedY = 4f + (float)Rand.Next(0, 21) * 0.05f;
                                             damage3 = 40;
                                             vector3 = new Vector2(i * 16 + 8, j * 16 + 16);
                                             vector3.Y += 6f;
-                                            Projectile.NewProjectile((int)vector3.X, (int)vector3.Y, speedX, speedY, num159, damage3, 2f, Main.myPlayer);
+                                            NewProjectile((int)vector3.X, (int)vector3.Y, speedX, speedY, num159, damage3, 2f, Main.myPlayer);
                                         }
                                         break;
                                     }
@@ -29436,7 +29772,7 @@ namespace EternalLandPlugin.Game
                             }
                             if (num159 != 0)
                             {
-                                Projectile.NewProjectile((int)vector3.X, (int)vector3.Y, speedX, speedY, num159, damage3, 2f, Main.myPlayer);
+                                NewProjectile((int)vector3.X, (int)vector3.Y, speedX, speedY, num159, damage3, 2f, Main.myPlayer);
                             }
                             break;
                         }
@@ -29458,7 +29794,7 @@ namespace EternalLandPlugin.Game
                                 float knockBack2 = 10f;
                                 if (num155 != 0)
                                 {
-                                    Projectile.NewProjectile((int)vector2.X, (int)vector2.Y, 0f, 0f, num155, damage2, knockBack2, Main.myPlayer);
+                                    NewProjectile((int)vector2.X, (int)vector2.Y, 0f, 0f, num155, damage2, knockBack2, Main.myPlayer);
                                 }
                             }
                             break;
@@ -29481,7 +29817,7 @@ namespace EternalLandPlugin.Game
                     case 141:
                         KillTile(i, j, fail: false, effectOnly: false, noItem: true);
                         SendTileSquare(-1, i, j, 1);
-                        Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0f, 108, 500, 10f, Main.myPlayer);
+                        NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0f, 108, 500, 10f, Main.myPlayer);
                         break;
                     case 210:
                         ExplodeMine(i, j);
@@ -29921,7 +30257,7 @@ namespace EternalLandPlugin.Game
                                             }
                                             if (num146 > 0)
                                             {
-                                                int num148 = array2[Main.rand.Next(num146)];
+                                                int num148 = array2[Rand.Next(num146)];
                                                 Main.npc[num148].position.X = num137 - Main.npc[num148].width / 2;
                                                 Main.npc[num148].position.Y = num138 - Main.npc[num148].height - 1;
                                                 SendDataToPlayer(23, -1, -1, null, num148);
@@ -29951,7 +30287,7 @@ namespace EternalLandPlugin.Game
                                             }
                                             if (num142 > 0)
                                             {
-                                                int num144 = array[Main.rand.Next(num142)];
+                                                int num144 = array[Rand.Next(num142)];
                                                 Main.npc[num144].position.X = num137 - Main.npc[num144].width / 2;
                                                 Main.npc[num144].position.Y = num138 - Main.npc[num144].height - 1;
                                                 SendDataToPlayer(23, -1, -1, null, num144);
@@ -30191,8 +30527,8 @@ namespace EternalLandPlugin.Game
                 int type = 167 + num2;
                 int damage = 150;
                 int num3 = 7;
-                int num4 = Projectile.NewProjectile(vector.X, vector.Y + 2f, 0f, -8f, type, damage, num3, Main.myPlayer);
-                Main.projectile[num4].originatedFromActivableTile = true;
+                int num4 = NewProjectile(vector.X, vector.Y + 2f, 0f, -8f, type, damage, num3, Main.myPlayer);
+                //Proj[num4].originatedFromActivableTile = true;
                 this[x, y].active(active: false);
                 this[x, y + 1].active(active: false);
                 SendTileSquare(-1, x - 1, y, 3);
@@ -30201,7 +30537,7 @@ namespace EternalLandPlugin.Game
             {
                 KillTile(i, j, fail: false, effectOnly: false, noItem: true);
                 SendTileSquare(-1, i, j, 1);
-                Projectile.NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0f, 164, 250, 10f, Main.myPlayer);
+                NewProjectile(i * 16 + 8, j * 16 + 8, 0f, 0f, 164, 250, 10f, Main.myPlayer);
             }
             public void GeyserTrap(int i, int j)
             {
@@ -30230,7 +30566,7 @@ namespace EternalLandPlugin.Game
                     }
                     if (num3 != 0)
                     {
-                        Projectile.NewProjectile((int)zero.X, (int)zero.Y, zero2.X, zero2.Y, num3, damage, 2f, Main.myPlayer);
+                        NewProjectile((int)zero.X, (int)zero.Y, zero2.X, zero2.Y, num3, damage, 2f, Main.myPlayer);
                     }
                 }
             }
@@ -31698,6 +32034,25 @@ namespace EternalLandPlugin.Game
             }
             #endregion
         }
+        public static void SendAllItem(EPlayer eplr)
+        {
+            if (eplr.IsInAnotherWorld)
+            {
+                var map = eplr.Map;
+                for (int i = 0; i < 400; i++)
+                {
+                    eplr.SendRawData(new RawDataWriter().SetType(PacketTypes.UpdateItemDrop).PackInt16((short)i).PackVector2(map.Items[i].position).PackVector2(map.Items[i].velocity).PackInt16((short)map.Items[i].stack).PackByte((byte)map.Items[i].prefix).PackByte((byte)false.ToInt()).PackInt16((short)map.Items[i].type).GetByteData());
+                }
+            }
+            else
+            {
+                for (int i = 0; i < 400; i++)
+                {
+                    var tempitem = Main.item[i] ?? new Item();
+                    eplr.SendRawData(new RawDataWriter().SetType(PacketTypes.UpdateItemDrop).PackInt16((short)i).PackVector2(tempitem.position).PackVector2(tempitem.velocity).PackInt16((short)tempitem.stack).PackByte((byte)tempitem.prefix).PackByte((byte)false.ToInt()).PackInt16((short)tempitem.type).GetByteData());
+                }
+            }
+        }
         public static bool GetMapFromUUID(Guid uuid, out MapData data)
         {
             foreach (var map in GameData.ActiveMap)
@@ -31708,27 +32063,42 @@ namespace EternalLandPlugin.Game
                     return true;
                 }
             }
-            data = new MapData();
+            data = null;
             return false;
         }
         public static bool IsTerritoryActive(Guid uuid)
         {
             return GameData.ActiveMap.ContainsKey(uuid);
         }
+        public static bool ReBuildTerritory(Guid uuid)
+        {
+            if (GameData.ActiveMap.ContainsKey(uuid))
+            {
+                return true;
+            }
+            else if (GameData.GetMapData(uuid.ToString(), out var map))
+            {
+                map.Player.Clear();
+                GameData.ActiveMap.Add(uuid, map);
+                return true;
+            }
+            return false;
+        }
         public static Guid CreateMultiPlayerMap(string name, int x = -1, int y = -1)
         {
 
             if (GameData.Map.ContainsKey(name))
             {
-                var data = GameData.GetMapData(name);
-                if (data == null) return Guid.Empty;
-                return CreateMultiPlayerMap(data, x, y).Result;
+                if (GameData.GetMapData(name, out var map))
+                {
+                    return CreateMultiPlayerMap(map, x, y).Result;
+                }
+                return Guid.Empty;
             }
             else
             {
                 return Guid.Empty;
             }
-
         }
         public async static Task<Guid> CreateMultiPlayerMap(MapData data, int x = -1, int y = -1)
         {
@@ -31761,15 +32131,12 @@ namespace EternalLandPlugin.Game
                 {
                     if (!check.ContainsKey(map.Key)) check.Add(map.Key, 0);
                     if (!map.Value.GetAllPlayers().Any()) check[map.Key]++;
-                    if (check[map.Key] > 30)
+                    if (check[map.Key] > 60)
                     {
                         map.Value.Dispose();
                         check.Remove(map.Key);
-                        GameData.ActiveMap[map.Key] = null;
-                        GameData.ActiveMap.Remove(map.Key);
                         restartnow = true;
-                        Utils.Broadcast($"世界 {map.Key} 已销毁.");
-                        Log.Info($"世界 {map.Key} 已销毁.");
+                        Log.Info($"{(map.Value.KeepAlive ? "" : "临时")}世界 {map.Key}<{map.Value.Name}> 已{(map.Value.KeepAlive ? "注销" : "销毁")}.");
                         break;
                     }
                     check.ForEach(c => { if (!MapManager.GetMapFromUUID(c.Key, out var az)) check.Remove(c.Key); });
@@ -31782,11 +32149,65 @@ namespace EternalLandPlugin.Game
         {
             if (eplr.IsInAnotherWorld)
             {
-                Main.projectile.Where(p => p.active && eplr.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
+                eplr.Map.Proj.ForEach(p =>
+                {
+                    p = p ?? new Projectile();
+                    BitsByte bb = 0;
+                    for (int num11 = 0; num11 < Projectile.maxAI; num11++)
+                    {
+                        if (p.ai[num11] != 0f)
+                        {
+                            bb[num11] = true;
+                        }
+                    }
+                    if (p.damage != 0)
+                    {
+                        bb[4] = true;
+                    }
+                    if (p.knockBack != 0f)
+                    {
+                        bb[5] = true;
+                    }
+                    if (p.type > 0 && p.type < 950 && ProjectileID.Sets.NeedsUUID[p.type])
+                    {
+                        bb[7] = true;
+                    }
+                    if (p.originalDamage != 0)
+                    {
+                        bb[6] = true;
+                    }
+                    var writer = new RawDataWriter().SetType(PacketTypes.ProjectileNew).PackInt16((short)p.identity).PackVector2(p.position).PackVector2(p.velocity).PackByte((byte)p.owner).PackInt16((short)p.type).PackByte(bb);
+                    for (int num11 = 0; num11 < Projectile.maxAI; num11++)
+                    {
+                        if (p.ai[num11] != 0f)
+                        {
+                            writer.PackSingle(p.ai[num11]);
+                        }
+                    }
+                    if (p.damage != 0)
+                    {
+                        writer.PackInt16((short)p.damage);
+                    }
+                    if (p.knockBack != 0f)
+                    {
+                        writer.PackSingle(p.knockBack);
+                    }
+                    if (p.type > 0 && p.type < 950 && ProjectileID.Sets.NeedsUUID[p.type])
+                    {
+                        writer.PackInt16((short)p.projUUID);
+                    }
+                    if (p.originalDamage != 0)
+                    {
+                        writer.PackInt16((short)p.originalDamage);
+                    }
+                    eplr.SendRawData(writer.GetByteData());
+                    if (!p.active) eplr.SendData(PacketTypes.ProjectileDestroy, "", p.identity, p.owner);
+                });
+
             }
             else
             {
-                Main.projectile.Where(p => p.active && eplr.Map.Player.Contains(p.owner)).ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
+                Main.projectile.ForEach(proj => eplr.SendData(PacketTypes.ProjectileNew, "", proj.identity));
             }
         }
         public static void SendMap(EPlayer eplr, MapData data, int x, int y)
@@ -31812,6 +32233,13 @@ namespace EternalLandPlugin.Game
                 GameData.ActiveMap.Values.ForEach(map =>
                 {
                     map.UpdateLiquid();
+                    for (int i = 0;i<400;i++)
+                    {
+                        if (map.Items[i] == null || !map.Items[i].active) continue;
+                        if (map.Items[i].keepTime > 0) map.Items[i].keepTime--;
+                        if (map.Items[i].ownTime > 0) map.Items[i].ownTime--;
+                        map.Items[i].FindOwner(i, map);
+                    }
                 });
             }
             catch { }
@@ -31833,7 +32261,7 @@ namespace EternalLandPlugin.Game
                     binaryWriter.BaseStream.Position = position;
                     eplr.SendRawData(memoryStream.ToArray());
                 }
-            }            
+            }
         }
         static void WorldInfo(BinaryWriter binaryWriter, bool toorigin = false)
         {
@@ -32432,6 +32860,7 @@ namespace EternalLandPlugin.Game
         }
         #endregion
     }
+    #region 一些魔改类
     public class MapTools
     {
         [MessagePackObject]
@@ -33049,6 +33478,178 @@ namespace EternalLandPlugin.Game
 
         }
         [MessagePackObject]
+        public class Projectile
+        {
+            public Projectile()
+            {
+                SetDefault(0);
+            }
+            public static int maxAI = 2;
+
+            public bool active = false;
+            public int owner = 255;
+            public int identity = 0;
+            public int projUUID = 0;
+            public int type = 0;
+            public int damage = 0;
+            public int originalDamage = 0;
+            public float knockBack = 0;
+            public Vector2 position = new Vector2();
+            public Vector2 velocity = new Vector2();
+            public float[] ai = new float[Terraria.Projectile.maxAI];
+            public float stepSpeed = 0f;
+            public float gfxOffY = 0f;
+            public bool wet = false;
+            public int timeLeft = 0;
+            public bool honeyWet = false;
+            public int penetrate = 0;
+
+            public int frame = 0;
+
+            public int aiStyle = 0;
+            public int width => projectile.width;
+            public int height => projectile.height;
+            public bool ignoreWater => projectile.ignoreWater;
+            public bool netImportant => projectile.netImportant;
+
+            public Terraria.Projectile projectile
+            {
+                get
+                {
+                    var p = new Terraria.Projectile();
+                    p.SetDefaults(type);
+                    p.ai = ai;
+                    p.position = position;
+                    p.velocity = velocity;
+                    p.knockBack = knockBack;
+                    p.damage = damage;
+                    p.owner = owner;
+                    p.identity = identity;
+                    p.projUUID = projUUID;
+                    p.timeLeft = timeLeft;
+                    return p;
+                }
+            }
+
+            public void Update(EPlayer eplr)
+            {
+                BitsByte bb = 0;
+                for (int num11 = 0; num11 < Projectile.maxAI; num11++)
+                {
+                    if (ai[num11] != 0f)
+                    {
+                        bb[num11] = true;
+                    }
+                }
+                if (damage != 0)
+                {
+                    bb[4] = true;
+                }
+                if (knockBack != 0f)
+                {
+                    bb[5] = true;
+                }
+                if (type > 0 && type < 950 && ProjectileID.Sets.NeedsUUID[type])
+                {
+                    bb[7] = true;
+                }
+                if (originalDamage != 0)
+                {
+                    bb[6] = true;
+                }
+                var writer = new RawDataWriter().SetType(PacketTypes.ProjectileNew).PackInt16((short)identity).PackVector2(position).PackVector2(velocity).PackByte((byte)owner).PackInt16((short)type).PackByte(bb);
+                for (int num11 = 0; num11 < Projectile.maxAI; num11++)
+                {
+                    if (ai[num11] != 0f)
+                    {
+                        writer.PackSingle(ai[num11]);
+                    }
+                }
+                if (damage != 0)
+                {
+                    writer.PackInt16((short)damage);
+                }
+                if (knockBack != 0f)
+                {
+                    writer.PackSingle(knockBack);
+                }
+                if (type > 0 && type < 950 && ProjectileID.Sets.NeedsUUID[type])
+                {
+                    writer.PackInt16((short)projUUID);
+                }
+                if (originalDamage != 0)
+                {
+                    writer.PackInt16((short)originalDamage);
+                }
+                eplr.Map.SendRawDataToPlayer(writer.GetByteData());
+            }
+            public void SetDefault(int type)
+            {
+                var p = new Terraria.Projectile();
+                p.SetDefaults(type);
+                aiStyle = p.aiStyle;
+                damage = p.damage;
+                originalDamage = p.originalDamage;
+                knockBack = p.knockBack;
+                stepSpeed = p.stepSpeed;
+                gfxOffY = p.gfxOffY;
+                ai = p.ai;
+            }
+            public void Kill()
+            {
+                SetDefault(0);
+                timeLeft = 0;
+                active = false;
+            }
+            public float Distance(Vector2 Other)
+            {
+                return 1f;
+            }
+            public Vector2 Center
+            {
+                get
+                {
+                    return new Vector2(position.X + (float)(width / 2), position.Y + (float)(height / 2));
+                }
+                set
+                {
+                    position = new Vector2(value.X - (float)(width / 2), value.Y - (float)(height / 2));
+                }
+            }
+            public void ProjectileFixDesperation(MapManager.MapData map)
+            {
+                if (owner < 0 || owner >= 1000)
+                {
+                    return;
+                }
+                switch (type)
+                {
+                    case 461:
+                    case 632:
+                    case 642:
+                    case 644:
+                        {
+                            int num = 0;
+                            while (true)
+                            {
+                                if (num < 1000)
+                                {
+                                    if (map.Proj[num].owner == owner && (float)map.Proj[num].identity == ai[1] && map.Proj[num].active)
+                                    {
+                                        break;
+                                    }
+                                    num++;
+                                    continue;
+                                }
+                                return;
+                            }
+                            ai[1] = num;
+                            break;
+                        }
+                }
+            }
+        }
+        [MessagePackObject]
         public class LiquidBuffer
         {
             [Key(0)]
@@ -33056,7 +33657,155 @@ namespace EternalLandPlugin.Game
             [Key(1)]
             public int y;
         }
+        [MessagePackObject]
+        public struct Vector2
+        {
+            public Vector2(bool a = false)
+            {
+                X = 0;
+                Y = 0;
+            }
+            public Vector2(float x, float y)
+            {
+                X = x;
+                Y = y;
+            }
+            [Key(0)]
+            public float X;
+            [Key(1)]
+            public float Y;
+
+            public static implicit operator Vector2(Microsoft.Xna.Framework.Vector2 v)
+            {
+                return new Vector2(v.X, v.Y);
+            }
+
+            public static implicit operator Microsoft.Xna.Framework.Vector2(Vector2 v)
+            {
+                return new Microsoft.Xna.Framework.Vector2(v.X, v.Y);
+            }
+            public static bool operator ==(Vector2 value1, Vector2 value2)
+            {
+                return value1.X == value2.X && value1.Y == value2.Y;
+            }
+
+            public static bool operator !=(Vector2 value1, Vector2 value2)
+            {
+                return value1.X != value2.X || value1.Y != value2.Y;
+            }
+
+            public static Vector2 operator +(Vector2 value1, Vector2 value2)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value1.X + value2.X;
+                result.Y = value1.Y + value2.Y;
+                return result;
+            }
+
+            public static Vector2 operator -(Vector2 value1, Vector2 value2)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value1.X - value2.X;
+                result.Y = value1.Y - value2.Y;
+                return result;
+            }
+
+            public static Vector2 operator *(Vector2 value1, Vector2 value2)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value1.X * value2.X;
+                result.Y = value1.Y * value2.Y;
+                return result;
+            }
+
+            public static Vector2 operator *(Vector2 value, float scaleFactor)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value.X * scaleFactor;
+                result.Y = value.Y * scaleFactor;
+                return result;
+            }
+
+            public static Vector2 operator *(float scaleFactor, Vector2 value)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value.X * scaleFactor;
+                result.Y = value.Y * scaleFactor;
+                return result;
+            }
+
+            public static Vector2 operator /(Vector2 value1, Vector2 value2)
+            {
+                Vector2 result = default(Vector2);
+                result.X = value1.X / value2.X;
+                result.Y = value1.Y / value2.Y;
+                return result;
+            }
+
+            public static Vector2 operator /(Vector2 value1, float divider)
+            {
+                float num = 1f / divider;
+                Vector2 result = default(Vector2);
+                result.X = value1.X * num;
+                result.Y = value1.Y * num;
+                return result;
+            }
+            public float Length()
+            {
+                float num = X * X + Y * Y;
+                return (float)Math.Sqrt(num);
+            }
+        }
+        public struct Point
+        {
+
+            public int X;
+
+            public int Y;
+
+            public Point(int x, int y)
+            {
+                X = x;
+                Y = y;
+            }
+
+            public static implicit operator Point(Microsoft.Xna.Framework.Point v)
+            {
+                return new Point(v.X, v.Y);
+            }
+
+            public static implicit operator Microsoft.Xna.Framework.Point(Point v)
+            {
+                return new Microsoft.Xna.Framework.Point(v.X, v.Y);
+            }
+
+            public static bool operator ==(Point a, Point b)
+            {
+                return a.Equals(b);
+            }
+
+            public static bool operator !=(Point a, Point b)
+            {
+                return a.X != b.X || a.Y != b.Y;
+            }
+
+            public override bool Equals(object obj)
+            {
+                if (obj is Point)
+                {
+                    Point point = (Point)obj;
+                    return point.X == X && point.Y == Y;
+                }
+                return false;
+            }
+
+            public override int GetHashCode()
+            {
+                return X.GetHashCode() + Y.GetHashCode();
+            }
+        }
     }
+
     [MessagePackObject]
     [Serializable]
     [StructLayout(LayoutKind.Sequential, Pack = 1, Size = 13)]
@@ -34056,4 +34805,5 @@ namespace EternalLandPlugin.Game
             }
         }
     }
+    #endregion
 }

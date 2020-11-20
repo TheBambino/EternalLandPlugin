@@ -39,6 +39,7 @@ namespace EternalLandPlugin
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
                         else if (type == typeof(Guid)) temp.SetValue(eplr, Guid.Parse(reader.Get<string>(temp.Name)));
+                        else if (type == typeof(Statistic)) temp.SetValue(eplr, JsonConvert.DeserializeObject<Statistic>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
@@ -55,6 +56,7 @@ namespace EternalLandPlugin
                         else if (type == typeof(double)) temp.SetValue(eplr, reader.Get<double>(temp.Name));
                         else if (type == typeof(int)) temp.SetValue(eplr, reader.Get<int>(temp.Name));
                         else if (type == typeof(Guid)) temp.SetValue(eplr, Guid.Parse(reader.Get<string>(temp.Name)));
+                        else if (type == typeof(Statistic)) temp.SetValue(eplr, JsonConvert.DeserializeObject<Statistic>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(List<EItem>)) temp.SetValue(eplr, JsonConvert.DeserializeObject<List<EItem>>(reader.Get<string>(temp.Name)));
                         else if (type == typeof(Microsoft.Xna.Framework.Color?)) temp.SetValue(eplr, TShock.Utils.DecodeColor(reader.Get<int>(temp.Name)));
                         else temp.SetValue(eplr, reader.Get<string>(temp.Name));
@@ -77,14 +79,14 @@ namespace EternalLandPlugin
         public static bool AddEPlayer(int id, string name)
         {
             Log.Info($"向数据库中添加玩家 {name}");
-            if (UserManager.GetTSPlayerFuzzy(name, out List<TSPlayer> list))
-            {
-                EternalLand.EPlayers[list[0].Index] = new EPlayer() { ID = id, Name = name };
-            }
             var bag = new List<EItem>();
             for (int i = 0; i < 260; i++)
             {
                 bag.Add(new EItem());
+            }
+            if (UserManager.GetTSPlayerFuzzy(name, out List<TSPlayer> list))
+            {
+                EternalLand.EPlayers[list[0].Index] = new EPlayer() { ID = id, Name = name};
             }
             return RunSql($"INSERT INTO EternalLand (ID,Name,Bag) VALUE (@0,@1,@2)", new object[]
             {
@@ -232,9 +234,9 @@ namespace EternalLandPlugin
             });
         }
 
-        public static async void SaveMap(string name, MapManager.MapData data)
+        public static async Task<bool> SaveMap(string name, MapManager.MapData data)
         {
-            await Task.Run(() =>
+            return await Task.Run(() =>
             {
                 try
                 {
@@ -244,7 +246,16 @@ namespace EternalLandPlugin
                         alltime.Start();
                         byte[] map = MessagePackSerializer.Serialize(value: data, MessagePackSerializerOptions.Standard.WithCompression(MessagePackCompression.Lz4Block));
                         alltime.Stop();
-                        Log.Info($"序列化地图 {name} 耗时 {alltime.ElapsedMilliseconds} ms, 文件大小为 {Math.Round(((double)map.Length) / 1024 / 1024, 4)} MB, 地图大小为 {data.Width} * {data.Height}.\n开始上传至数据库.");
+                        /*if(data.Owner != -1 && Math.Round(((double)map.Length) / 1024 / 1024, 4) < 2.5)
+                        {
+                            if (UserManager.TryGetEPlayerFromID(data.Owner, out var eplr))
+                            {
+                                eplr.SendErrorEX($"[InternalError] 序列化属地时发生致命错误, 为保证数据安全已重置此次属地改动.");
+                            }
+                            Log.Error($"序列化属地 {data.Name} 时发生致命错误.");
+                            return false;
+                        }*/
+                        Log.Info($"序列化地图 {name}<{data.Name}> 耗时 {alltime.ElapsedMilliseconds} ms, 文件大小为 {Math.Round(((double)map.Length) / 1024 / 1024, 4)} MB, 地图大小为 {data.Width} * {data.Height}.\n开始上传至数据库.");
                         IDbConnection dbConnection = TShock.DB.CloneEx();
                         QueryResult result;
                         try
@@ -260,22 +271,47 @@ namespace EternalLandPlugin
                                 }
                                 dbCommand.CommandTimeout = 60000;
                                 result = new QueryResult(dbConnection, dbCommand.ExecuteReader());
-                                Log.Info($"地图 {name} 上传完成.");
                                 if (!GameData.Map.ContainsKey(name)) GameData.Map.Add(name, map);
                                 else GameData.Map[name] = map;
-                                return;
+                                Log.Info($"地图 {name}<{data.Name}> 上传完成.");
+                                return true;
                             }
                         }
                         catch (Exception innerException)
                         {
                             Log.Error("SQL异常.\n" + innerException);
-                            return;
                         }
                     }
                 }
                 catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException); }
+                return false;
             });
         }
+        public static async Task<byte[]> GetMap(string name)
+        {
+            return await Task.Run(() =>
+            {
+                Log.Info($"正在读入地图 {name}.");
+                var reader = RunSql($"SELECT * FROM EternalLandMap WHERE Name=@0", new object[] { name });
+                System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
+                alltime.Start();
+                if (reader.Read())
+                {
+                    try
+                    {
+                        int FileSize = reader.Reader.GetInt32(reader.Reader.GetOrdinal("Length"));
+                        var rawData = new byte[FileSize];
+                        reader.Reader.GetBytes(reader.Reader.GetOrdinal("Data"), 0, rawData, 0, FileSize);
+                        alltime.Stop();
+                        Log.Info($"读取地图 {name}, 耗时 {alltime.ElapsedMilliseconds} ms.");
+                        return rawData;
+                    }
+                    catch (Exception ex) { Log.Error(ex.InnerException == null ? ex : ex.InnerException);  }
+                }
+                return null;
+            });
+        }
+
         public static async void GetAllMap()
         {
             await Task.Run(() =>
@@ -283,7 +319,7 @@ namespace EternalLandPlugin
                 Log.Info($"正在读入地图.");
                 var reader = RunSql($"SELECT * FROM EternalLandMap");
                 //BinaryFormatter formatter = new BinaryFormatter();
-                Log.Info($"开始反序列化地图.");
+                Log.Info($"开始载入地图.");
                 System.Diagnostics.Stopwatch alltime = new System.Diagnostics.Stopwatch();
                 alltime.Start();
                 while (reader.Read())

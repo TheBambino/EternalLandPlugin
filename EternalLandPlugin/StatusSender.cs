@@ -3,6 +3,8 @@ using System;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Terraria;
+using Terraria.ID;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -47,7 +49,7 @@ namespace EternalLandPlugin
                                 }
                             }
                             text = $"{rambotitle}                                                                \r\n" +
-                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n" +
+                            $"[c/{(Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n" +
                              $"[c/9FD1C4:资产:] {eplr.Money}\n" +
                              $"[c/9FD1C4:延迟:] {(eplr.ping < 60 ? "[i:3738]" : "[i:3736]")} {eplr.ping} ms\n" +
                              $"[c/9FD1C4:饥饿:] [{hungry}]\n" +
@@ -56,7 +58,7 @@ namespace EternalLandPlugin
                         else
                         {
                             text = $"{rambotitle}                                                                \r\n" +
-                            $"[c/{(Terraria.Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n"
+                            $"[c/{(Main.dayTime ? "42584F" : "DCDCDC")}:----------------]\r\n"
                             + $"[c/9FD1C4:    欢迎加入服务器]" +
                             $"{RepeatLineBreaks(59)}";
                         }
@@ -68,19 +70,18 @@ namespace EternalLandPlugin
             }
         }
 
-        public async static void GetPingPakcet(TSPlayer tsp)
+        public async static void GetPingPakcet(int index)
         {
             await Task.Run(() =>
             {
-                var eplr = tsp.EPlayer();
+                var eplr = TShock.Players[index] is null ? null : TShock.Players[index].EPlayer();
                 if (eplr != null)
                 {
                     eplr.ping = eplr.PingChecker.ElapsedMilliseconds - 16 <= 0 ? eplr.ping : eplr.PingChecker.ElapsedMilliseconds;
                     Thread.Sleep(200);
                     eplr.PingChecker.Restart();
                 }
-
-                tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
+                NetMessage.SendData(39, index, -1, null, 0);
             });
         }
 

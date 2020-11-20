@@ -50,7 +50,7 @@ namespace EternalLandPlugin
             catch { }
         }
 
-        public static async void OnKill(NPC npc)
+        /*public static async void OnKill(NPC npc)
         {
             await Task.Run(() =>
             {
@@ -72,6 +72,6 @@ namespace EternalLandPlugin
                     });
                 }
             });
-        }
+        }*/
     }
 }

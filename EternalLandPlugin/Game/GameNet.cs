@@ -2,13 +2,19 @@
 using EternalLandPlugin.Net;
 using Microsoft.Xna.Framework;
 using OTAPI.Tile;
+using System.Data;
 using System.IO;
+using System.IO.Streams;
+using System.Linq;
 using System.Threading.Tasks;
 using Terraria;
+using Terraria.DataStructures;
 using Terraria.ID;
 using Terraria.Localization;
 using TerrariaApi.Server;
 using TShockAPI;
+using TShockAPI.Models.Projectiles;
+using Projectile = EternalLandPlugin.Game.MapTools.Projectile;
 
 namespace EternalLandPlugin.Game
 {
@@ -91,6 +97,9 @@ namespace EternalLandPlugin.Game
                 case PacketTypes.PlaceObject:
                     MuitiMapDataCheck(args);
                     break;
+                case PacketTypes.PlayerSpawn:
+                    MuitiMapDataCheck(args);
+                    break;
             }
         }
         public static void MuitiMapDataCheck(SendDataEventArgs args)
@@ -131,98 +140,323 @@ namespace EternalLandPlugin.Game
         }
         public async static void OnGetData(GetDataEventArgs args)
         {
-            if (args.MsgID == PacketTypes.ItemOwner || args.MsgID == PacketTypes.RemoveItemOwner || args.MsgID == PacketTypes.PlayerUpdate || args.MsgID == PacketTypes.ItemDrop || args.MsgID == PacketTypes.Status)
-            {
-                return;
-            }
+            /* if (args.MsgID == PacketTypes.ItemOwner || args.MsgID == PacketTypes.RemoveItemOwner || args.MsgID == PacketTypes.PlayerUpdate || args.MsgID == PacketTypes.ItemDrop || args.MsgID == PacketTypes.Status)
+             {
+                 return;
+             }*/
             var eplr = EternalLand.EPlayers[args.Msg.whoAmI];
             //Utils.Broadcast(args.MsgID);
-            using (MemoryStream r = new MemoryStream(args.Msg.readBuffer, args.Index, args.Length - 1))
+            if (eplr != null)
             {
-                using (var reader = new BinaryReader(r))
+                using (MemoryStream r = new MemoryStream(args.Msg.readBuffer, args.Index, args.Length - 1))
                 {
-
-                    switch (args.MsgID)
+                    using (var reader = new BinaryReader(r))
                     {
-                        case PacketTypes.Tile:
-                            int type = reader.ReadByte();
-                            int x = (int)reader.ReadInt16();
-                            int y = (int)reader.ReadInt16();
-                            short data = reader.ReadInt16();
-                            int style = (int)reader.ReadByte();
-                            bool flag = data == 1;
-                            args.Handled = OnTileEdit(eplr, type, x, y, data, style, flag);
-                            break;
-                        case PacketTypes.PlaceObject:
-                            x = (int)reader.ReadInt16();
-                            y = (int)reader.ReadInt16();
-                            type = reader.ReadInt16();
-                            style = (int)reader.ReadInt16();
-                            int alternate = (int)reader.ReadByte();
-                            int random = (int)reader.ReadSByte();
-                            int direction;
-                            if (reader.ReadBoolean())
-                            {
-                                direction = 1;
-                            }
-                            else
-                            {
-                                direction = -1;
-                            }
-                            args.Handled = await OnPlaceObject(eplr, x, y, type, style, alternate, random, direction);
-                            break;
-                        case PacketTypes.DoorUse:
-                            byte action = reader.ReadByte();
-                            x = (int)reader.ReadInt16();
-                            y = (int)reader.ReadInt16();
-                            if (!WorldGen.InWorld(x, y, 3))
-                            {
-                                return;
-                            }
-                            direction = (reader.ReadByte() == 0) ? -1 : 1;
-                            args.Handled = await OnDoorUse(eplr, x, y, action, direction);
-                            break;
-                        case PacketTypes.PlaceChest:
-                            action = reader.ReadByte();
-                            x = reader.ReadInt16();
-                            y = reader.ReadInt16();
-                            style = reader.ReadInt16();
-                            args.Handled = OnPlaceChest(eplr, action, x, y, style);
-                            break;
-                        case PacketTypes.ChestItem:
-                            int id = (int)reader.ReadInt16();
-                            int slot = (int)reader.ReadByte();
-                            int stack = (int)reader.ReadInt16();
-                            int prefix = (int)reader.ReadByte();
-                            type = (int)reader.ReadInt16();
-                            args.Handled = OnUpdateChestItem(eplr, id, slot, stack, prefix, type);
-                            break;
-                        case PacketTypes.SignRead:
-                            x = (int)reader.ReadInt16();
-                            y = (int)reader.ReadInt16();
-                            args.Handled = OnRequireSign(eplr, x, y);
-                            break;
-                        case PacketTypes.SignNew:
-                            id = (int)reader.ReadInt16();
-                            x = (int)reader.ReadInt16();
-                            y = (int)reader.ReadInt16();
-                            string text = reader.ReadString();
-                            int playerid = (int)reader.ReadByte();
-                            args.Handled = OnUpdateSign(eplr, id, x, y, text, playerid);
-                            break;
+
+                        switch (args.MsgID)
+                        {
+                            case PacketTypes.Tile:
+                                int type = reader.ReadByte();
+                                int x = (int)reader.ReadInt16();
+                                int y = (int)reader.ReadInt16();
+                                short data = reader.ReadInt16();
+                                int style = (int)reader.ReadByte();
+                                bool flag = data == 1;
+                                args.Handled = OnTileEdit(eplr, type, x, y, data, style, flag);
+                                break;
+                            case PacketTypes.PlaceObject:
+                                x = (int)reader.ReadInt16();
+                                y = (int)reader.ReadInt16();
+                                type = reader.ReadInt16();
+                                style = (int)reader.ReadInt16();
+                                int alternate = (int)reader.ReadByte();
+                                int random = (int)reader.ReadSByte();
+                                int direction;
+                                if (reader.ReadBoolean())
+                                {
+                                    direction = 1;
+                                }
+                                else
+                                {
+                                    direction = -1;
+                                }
+                                args.Handled = OnPlaceObject(eplr, x, y, type, style, alternate, random, direction).Result;
+                                break;
+                            case PacketTypes.DoorUse:
+                                byte action = reader.ReadByte();
+                                x = (int)reader.ReadInt16();
+                                y = (int)reader.ReadInt16();
+                                if (!WorldGen.InWorld(x, y, 3))
+                                {
+                                    return;
+                                }
+                                direction = (reader.ReadByte() == 0) ? -1 : 1;
+                                args.Handled = await OnDoorUse(eplr, x, y, action, direction);
+                                break;
+                            case PacketTypes.PlaceChest:
+                                action = reader.ReadByte();
+                                x = reader.ReadInt16();
+                                y = reader.ReadInt16();
+                                style = reader.ReadInt16();
+                                args.Handled = OnPlaceChest(eplr, action, x, y, style);
+                                break;
+                            case PacketTypes.ChestItem:
+                                int id = (int)reader.ReadInt16();
+                                int slot = (int)reader.ReadByte();
+                                int stack = (int)reader.ReadInt16();
+                                int prefix = (int)reader.ReadByte();
+                                type = (int)reader.ReadInt16();
+                                args.Handled = OnUpdateChestItem(eplr, id, slot, stack, prefix, type);
+                                break;
+                            case PacketTypes.SignRead:
+                                x = (int)reader.ReadInt16();
+                                y = (int)reader.ReadInt16();
+                                args.Handled = OnRequireSign(eplr, x, y);
+                                break;
+                            case PacketTypes.SignNew:
+                                id = (int)reader.ReadInt16();
+                                x = (int)reader.ReadInt16();
+                                y = (int)reader.ReadInt16();
+                                string text = reader.ReadString();
+                                int playerid = (int)reader.ReadByte();
+                                args.Handled = OnUpdateSign(eplr, id, x, y, text, playerid);
+                                break;
+                            case PacketTypes.HitSwitch:
+                                x = (int)reader.ReadInt16();
+                                y = (int)reader.ReadInt16();
+                                args.Handled = OnHitSwitch(eplr, x, y);
+                                break;
+                            case PacketTypes.PlayerHurtV2:
+                                int num217 = (int)reader.ReadByte();
+                                if (Main.netMode == 2 && args.Msg.whoAmI != num217 && (!Main.player[num217].hostile || !Main.player[args.Msg.whoAmI].hostile))
+                                {
+                                    args.Handled = true;
+                                    return;
+                                }
+                                PlayerDeathReason playerDeathReason = PlayerDeathReason.FromReader(reader);
+                                int damage = (int)reader.ReadInt16();
+                                direction = (int)(reader.ReadByte() - 1);
+                                BitsByte bitsByte = reader.ReadByte();
+                                bool crit = bitsByte[0];
+                                bool pvp = bitsByte[1];
+                                int num219 = (int)reader.ReadSByte();
+                                OnPlayerHurt(eplr, num217, damage, direction, crit, pvp, playerDeathReason, num219);
+                                args.Handled = true;
+                                break;
+                            case PacketTypes.PlayerHp:
+                                reader.ReadByte();
+                                int life = reader.ReadInt16();
+                                OnPlayerHeal(eplr, life);
+                                break;
+                            case PacketTypes.ProjectileNew:
+                                id = reader.ReadInt16();
+
+                                Vector2 pos = reader.ReadVector2();
+                                Vector2 vel = reader.ReadVector2();
+                                byte owner = reader.ReadByte();
+                                type = reader.ReadInt16();
+                                NewProjectileData newProjectileData = new NewProjectileData((byte)reader.ReadByte());
+                                float[] array = new float[Terraria.Projectile.maxAI];
+                                for (int i = 0; i < Terraria.Projectile.maxAI; i++)
+                                {
+                                    array[i] = ((!newProjectileData.AI[i]) ? 0f : reader.ReadSingle());
+                                }
+                                short dmg = (short)(newProjectileData.HasDamage ? reader.ReadInt16() : 0);
+                                float knockback = newProjectileData.HasKnockback ? reader.ReadSingle() : 0f;
+                                int origin = 0;
+                                if (newProjectileData.HasOriginalDamage)
+                                {
+                                    origin = reader.ReadInt16();
+                                }
+                                int uuid = 1000;
+                                if (newProjectileData.HasUUUID)
+                                {
+                                    uuid = reader.ReadInt16();
+                                }
+                                args.Handled = OnReceiveNewProj(eplr, pos, vel, id, uuid, type, origin, dmg, knockback, owner, array).Result;
+                                break;
+                            case PacketTypes.ItemDrop:
+                                int index = (int)reader.ReadInt16();
+                                Vector2 position = reader.ReadVector2();
+                                Vector2 velocity = reader.ReadVector2();
+                                stack = (int)reader.ReadInt16();
+                                prefix = (int)reader.ReadByte();
+                                bool nodelay = reader.ReadByte() == 1;
+                                type = (int)reader.ReadInt16();
+                                args.Handled = OnItemUpdate(eplr, index, position, velocity, stack, prefix, nodelay, type).Result;
+                                break;
+                            case PacketTypes.ItemOwner:
+                                index = (int)reader.ReadInt16();
+                                owner = reader.ReadByte();
+                                if (index == 0) StatusSender.GetPingPakcet(args.Msg.whoAmI);
+                                args.Handled = OnItemOwner(eplr, index, owner);
+                                break;
+                        }
                     }
                 }
             }
         }
-        public static void OnReceiveNewProj(object o, GetDataHandlers.NewProjectileEventArgs args)
+        public static void OnChat(ServerChatEventArgs args)
         {
-            var eplr = args.Player.EPlayer();
-            if (eplr != null)
+            if (UserManager.TryGetEPlayeFromName(Main.player[args.Who].name, out var eplr))
             {
-                //SendToAnotherPlayer(eplr, args);
+                args.Handled = true;
+                string text = args.Text;
+                if (!text.StartsWith("/") && !text.StartsWith(".") && text != "")
+                {
+                    eplr.Broadcast($"{eplr.Name} : {text}", default, false, false);
+                    eplr.Statistic.Chat += text.Length;
+                }
+                else
+                {
+                    Commands.HandleCommand(eplr.tsp, text);
+                }
             }
         }
-        public static Projectile CreateProjectile(Vector2 position, Vector2 velocity, int identity, int uuid, int type, int origindamage, int damage, float knockback, int owner, float[] AI)
+        public static void OnPlayerHurt(EPlayer eplr, int hurtid, int damage, int direction, bool crit, bool pvp, PlayerDeathReason reason, int cooldown)
+        {
+            if (crit) eplr.SendCombatMessage("暴击!", Color.CornflowerBlue, true);
+            if (Main.player[hurtid].statLife - damage > 0)
+            {
+                if (pvp)
+                {
+                    var hurter = EternalLand.EPlayers[reason._sourcePlayerIndex];
+                    if (hurter != null)
+                    {
+                        hurter.Statistic.Damage_Player += damage;
+                        hurter.Statistic.CritCount += crit ? 1 : 0;
+                        hurter.Statistic.KillPlayers += eplr.plr.statLife - damage > 0 ? 0 : 1;
+                    }
+                    eplr.Statistic.GetDamage += damage;
+                }
+                if (Main.player[hurtid] != null) Main.player[hurtid].Hurt(reason, damage, direction, pvp, true, crit, cooldown);
+                NetMessage.SendPlayerHurt(hurtid, reason, damage, direction, crit, pvp, cooldown, -1, eplr.Index);
+            }
+            else if (Main.player[hurtid] != null)
+            {
+                var deathreason = reason.GetDeathText(eplr.Name);
+                Item item = null;
+                if (reason._sourceItemType > 0)
+                {
+                    item = new Item();
+                    item.SetDefaults(reason._sourceItemType);
+                    item.prefix = (byte)reason._sourceItemPrefix;
+                }
+                deathreason._text = (item == null ? "" : TShock.Utils.ItemTag(item)) + " " + deathreason._text;
+                Main.player[hurtid].KillMe(reason, damage, direction, pvp);
+                NetMessage._currentPlayerDeathReason = new PlayerDeathReason();
+                BitsByte bb = 0;
+                bb[0] = pvp;
+                NetMessage.SendData(118, -1, -1, null, hurtid, (float)damage, (float)direction, (float)bb, 0, 0, 0);
+                UserManager.TryGetEPlayeFromName(Main.player[hurtid].name, out var hurteplr);
+                hurteplr.Statistic.GetDamage += eplr.plr.statLife;
+                hurteplr.Broadcast(deathreason._text, new Color(195, 83, 83), false);
+                hurteplr.Statistic.Dead++;
+
+            }
+        }
+        public static void OnNpcStrike(NpcStrikeEventArgs args)
+        {
+            if (UserManager.TryGetEPlayeFromName(args.Player.name, out EPlayer eplr))
+            {
+                eplr.Statistic.Damage_NPC += args.Damage;
+                if (args.Critical) eplr.Statistic.CritCount++;
+            }
+        }
+        public async static Task<bool> OnReceiveNewProj(EPlayer eplr, Vector2 position, Vector2 velocity, int identity, int uuid, int type, int origindamage, int damage, float knockback, int owner, float[] AI)
+        {
+            return await Task.Run(() =>
+            {
+                if (MapManager.GetMapFromUUID(eplr.MapUUID, out var map))
+                {
+
+                    if (uuid != 1000)
+                    {
+                        if (map.Proj[uuid] == null)
+                        {
+                            map.Proj[uuid] = CreateProjectile(map, position, velocity, identity, uuid, type, origindamage, damage, knockback, owner, AI);
+                            map.Proj[uuid].SetDefault(type);
+                        }
+                        map.Proj[uuid].active = true;
+                        map.Proj[uuid].velocity = velocity;
+                        map.Proj[uuid].position = position;
+                        map.Proj[uuid].ai = AI;
+                        map.Proj[uuid].damage = damage;
+                        map.Proj[uuid].originalDamage = origindamage;
+                        map.Proj[uuid].knockBack = knockback;
+                    }
+                    else
+                    {
+                        int num = -1;
+                        for (int i = 0; i < 1000; i++)
+                        {
+                            if (map.Proj[i] == null || !map.Proj[i].active || map.Proj[i].timeLeft < 500)
+                            {
+                                map.Proj[i] = CreateProjectile(map, position, velocity, identity, uuid, type, origindamage, damage, knockback, owner, AI);
+                                num = i;
+                                uuid = num;
+                                break;
+                            }
+                        }
+                        if (num == -1) map.Proj[0] = CreateProjectile(map, position, velocity, identity, uuid, type, origindamage, damage, knockback, owner, AI);
+                    }
+
+
+                    BitsByte bb = 0;
+                    for (int num11 = 0; num11 < Terraria.Projectile.maxAI; num11++)
+                    {
+                        if (AI[num11] != 0f)
+                        {
+                            bb[num11] = true;
+                        }
+                    }
+                    if (damage != 0)
+                    {
+                        bb[4] = true;
+                    }
+                    if (knockback != 0f)
+                    {
+                        bb[5] = true;
+                    }
+                    if (type > 0 && type < 950 && ProjectileID.Sets.NeedsUUID[type])
+                    {
+                        bb[7] = true;
+                    }
+                    if (origindamage != 0)
+                    {
+                        bb[6] = true;
+                    }
+                    var writer = new RawDataWriter().SetType(PacketTypes.ProjectileNew).PackInt16((short)identity).PackVector2(position).PackVector2(velocity).PackByte((byte)owner).PackInt16((short)type).PackByte(bb);
+                    for (int num11 = 0; num11 < Terraria.Projectile.maxAI; num11++)
+                    {
+                        if (AI[num11] != 0f)
+                        {
+                            writer.PackSingle(AI[num11]);
+                        }
+                    }
+                    if (damage != 0)
+                    {
+                        writer.PackInt16((short)damage);
+                    }
+                    if (knockback != 0f)
+                    {
+                        writer.PackSingle(knockback);
+                    }
+                    if (type > 0 && type < 950 && ProjectileID.Sets.NeedsUUID[type])
+                    {
+                        writer.PackInt16((short)uuid);
+                    }
+                    if (origindamage != 0)
+                    {
+                        writer.PackInt16((short)origindamage);
+                    }
+                    map.SendRawDataToPlayer(writer.GetByteData());
+                    return true;
+                }
+                return false;
+            });
+        }
+        public static Projectile CreateProjectile(MapManager.MapData map, Vector2 position, Vector2 velocity, int identity, int uuid, int type, int origindamage, int damage, float knockback, int owner, float[] AI)
         {
             Projectile projectile = new Projectile();
             projectile.identity = identity;
@@ -234,18 +468,22 @@ namespace EternalLandPlugin.Game
             projectile.knockBack = knockback;
             projectile.owner = owner;
             projectile.projUUID = uuid;
-            for (int num85 = 0; num85 < Projectile.maxAI; num85++)
+            for (int num85 = 0; num85 < Terraria.Projectile.maxAI; num85++)
             {
                 projectile.ai[num85] = AI[num85];
             }
-            projectile.ProjectileFixDesperation();
+            projectile.ProjectileFixDesperation(map);
             return projectile;
         }
         public static void OnReceiveKillProj(object o, GetDataHandlers.ProjectileKillEventArgs args)
         {
-            args.Player.SendSuccessMessage(args.ProjectileIndex.ToString());
+            var eplr = args.Player.EPlayer();
+            if (eplr != null && eplr.IsInAnotherWorld)
+            {
+                eplr.Map.Proj.Where(p => p != null && p.owner == eplr.Index && p.identity == args.ProjectileIdentity).ForEach(p => { p.SetDefault(0); p.active = false; p.timeLeft = 0; });
+                eplr.Map.SendDataToPlayer(PacketTypes.ProjectileDestroy, "EternalLand", args.ProjectileIndex, eplr.Index);
+            }
         }
-
         public static void OnPlayerSpawn(object o, GetDataHandlers.SpawnEventArgs args)
         {
             var eplr = args.Player.EPlayer();
@@ -254,9 +492,89 @@ namespace EternalLandPlugin.Game
                 args.Handled = true;
                 args.Player.TPlayer.Spawn(args.SpawnContext);
                 args.Player.Teleport(eplr.SpawnX, eplr.SpawnY);
+                if (eplr.IsInAnotherWorld) eplr.Map.SendRawDataToPlayer(new RawDataWriter().SetType(PacketTypes.PlayerSpawn).PackByte((byte)eplr.Index).PackInt16((short)eplr.SpawnX).PackInt16((short)eplr.SpawnY).PackInt32(TShock.Config.RespawnSeconds).PackByte((byte)2).GetByteData());
             }
         }
+        public static bool OnPlayerHeal(EPlayer eplr, int life)
+        {
+            int lifechange = life - eplr.plr.statLife;
+            eplr.Statistic.Heal += lifechange > 0 ? life : 0;
+            return false;
+        }
+        public async static Task<bool> OnItemUpdate(EPlayer eplr, int index, Vector2 position, Vector2 velocity, int stack, int prefix, bool nodelay, int type)
+        {
+            return await Task.Run(() =>
+            {
+                if (eplr.IsInAnotherWorld)
+                {
+                    var map = eplr.Map;
+                    if (map.timeItemSlotCannotBeReusedFor[index] > 0)
+                    {
+                        return true;
+                    }
+                    if (type == 0)
+                    {
+                        map.Items[index].active = false;
+                        map.Items[index].type = 0;
+                        map.SendRawDataToPlayer(new RawDataWriter().SetType(PacketTypes.ItemDrop).PackInt16((short)index).PackVector2(position).PackVector2(velocity).PackInt16((short)stack).PackByte((byte)prefix).PackByte((byte)nodelay.ToInt()).PackInt16((short)type).GetByteData());
+                        return true;
+                    }
+                    else
+                    {
+                        if (index == 400)
+                        {
+                            EItem item2 = new EItem();
+                            item2.type = type;
+                            index = map.NewItem((int)position.X, (int)position.Y, item2.width, item2.height, item2.type, stack, true, 0, nodelay, false);
+                            map.SendRawDataToPlayer(new RawDataWriter().SetType(PacketTypes.ItemDrop).PackInt16((short)index).PackVector2(position).PackVector2(velocity).PackInt16((short)stack).PackByte((byte)prefix).PackByte((byte)nodelay.ToInt()).PackInt16((short)type).GetByteData());
+                            if (!nodelay)
+                            {
+                                map.Items[index].ownIgnore = eplr.Index;
+                                map.Items[index].ownTime = 100;
+                            }
+                            map.Items[index].FindOwner(index, map);
+                            return true;
+                        }
+                        map.Items[index].type = type;
+                        map.Items[index].prefix = prefix;
+                        map.Items[index].stack = stack;
+                        map.Items[index].position = position;
+                        map.Items[index].velocity = velocity;
+                        map.Items[index].active = true;
+                        map.Items[index].playerIndexTheItemIsReservedFor = Main.myPlayer;
+                        map.GetAllPlayers().ForEach(e =>
+                        {
+                            e.SendRawData(new RawDataWriter().SetType(PacketTypes.ItemDrop).PackInt16((short)index).PackVector2(position).PackVector2(velocity).PackInt16((short)stack).PackByte((byte)prefix).PackByte((byte)nodelay.ToInt()).PackInt16((short)type).GetByteData());
+                        });
+                        return true;
+                    }
+                }
+                return false;
+            });
+        }
+        public static bool OnItemOwner(EPlayer eplr, int index, int owner)
+        {
+            if (eplr.IsInAnotherWorld)
+            {
+                var map = eplr.Map;
+                if (map.Items[index].playerIndexTheItemIsReservedFor != eplr.Index) return true;
+                map.Items[index].playerIndexTheItemIsReservedFor = owner;
+                if (owner == Main.myPlayer)
+                {
+                    map.Items[index].keepTime = 15;
+                }
+                else
+                {
+                    map.Items[index].keepTime = 0;
+                }
+                map.Items[index].playerIndexTheItemIsReservedFor = 255;
+                map.Items[index].keepTime = 15;
+                eplr.Map.SendRawDataToPlayer(new RawDataWriter().SetType(PacketTypes.ItemOwner).PackInt16((short)index).PackByte((byte)map.Items[index].playerIndexTheItemIsReservedFor).GetByteData());
 
+                return true;
+            }
+            return false;
+        }
         public static bool OnTileEdit(EPlayer eplr, int type, int x, int y, int data, int style, bool flag)
         {
             if (eplr != null)
@@ -425,7 +743,9 @@ namespace EternalLandPlugin.Game
                     }
                     else
                     {
-                        eplr.SendErrorEX("超出地图范围.");
+                        //eplr.SendErrorEX("超出地图范围.");
+                        map.KillTile(x, y);
+                        map.TileFrame(x, y);
                         eplr.SendData(PacketTypes.Tile, "", (int)GetDataHandlers.EditAction.KillActuator, x, y);
                         eplr.SendData(PacketTypes.Tile, "", (int)GetDataHandlers.EditAction.KillTile, x, y);
                         eplr.SendData(PacketTypes.Tile, "", (int)GetDataHandlers.EditAction.KillWall, x, y);
@@ -545,7 +865,7 @@ namespace EternalLandPlugin.Game
         }
         public static bool OnUpdateChestItem(EPlayer eplr, int id, int slot, int stack, int prefix, int type)
         {
-            if (eplr != null && eplr.IsInAnotherWorld)
+            if (eplr.IsInAnotherWorld)
             {
                 var map = eplr.Map;
                 if (map.Chest.Count >= id)
@@ -564,7 +884,7 @@ namespace EternalLandPlugin.Game
         }
         public static bool OnRequireSign(EPlayer eplr, int x, int y)
         {
-            if (eplr != null && eplr.IsInAnotherWorld)
+            if (eplr.IsInAnotherWorld)
             {
                 var map = eplr.Map;
                 int id = map.ReadSign(x, y, true);
@@ -579,7 +899,7 @@ namespace EternalLandPlugin.Game
         }
         public static bool OnUpdateSign(EPlayer eplr, int id, int x, int y, string text, int playerid)
         {
-            if (eplr != null && eplr.IsInAnotherWorld)
+            if (eplr.IsInAnotherWorld)
             {
                 var map = eplr.Map;
                 if (map.Sign.Count >= id)
@@ -607,7 +927,7 @@ namespace EternalLandPlugin.Game
         }
         public static bool OnPlaceChest(EPlayer eplr, byte action, int x, int y, int style)
         {
-            if (eplr != null && eplr.IsInAnotherWorld)
+            if (eplr.IsInAnotherWorld)
             {
                 var map = eplr.Map;
                 if (Main.netMode == 2)
@@ -650,7 +970,7 @@ namespace EternalLandPlugin.Game
                         if (num107 == -1)
                         {
                             map.SendDataToPlayer(34, eplr.Index, -1, null, (int)action, (float)x, (float)y, (float)style, num107);
-                            Item.NewItem(x * 16, y * 16, 32, 32, Chest.dresserItemSpawn[style], 1, true, 0, false, false);
+                            map.NewItem(x * 16, y * 16, 32, 32, Chest.dresserItemSpawn[style], 1, true, 0, false, false);
                             return true;
                         }
                         map.SendDataToPlayer(34, -1, -1, null, (int)action, (float)x, (float)y, (float)style, num107);
@@ -679,7 +999,7 @@ namespace EternalLandPlugin.Game
                         if (num108 == -1)
                         {
                             map.SendDataToPlayer(34, eplr.Index, -1, null, (int)action, (float)x, (float)y, (float)style, num108);
-                            Item.NewItem(x * 16, y * 16, 32, 32, Chest.chestItemSpawn2[style], 1, true, 0, false, false);
+                            map.NewItem(x * 16, y * 16, 32, 32, Chest.chestItemSpawn2[style], 1, true, 0, false, false);
                             return true;
                         }
                         map.SendDataToPlayer(34, -1, -1, null, (int)action, (float)x, (float)y, (float)style, num108);
@@ -752,6 +1072,18 @@ namespace EternalLandPlugin.Game
                     map.SquareTileFrame(x, y);
                 }
             }
+        }
+        public static bool OnHitSwitch(EPlayer eplr, int x, int y)
+        {
+            if (eplr.IsInAnotherWorld)
+            {
+                var map = eplr.Map;
+                map.SetCurrentUser(eplr.Index);
+                map.HitSwitch(x, y);
+                map.SetCurrentUser(-1);
+                return true;
+            }
+            return false;
         }
     }
 }

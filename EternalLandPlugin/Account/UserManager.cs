@@ -3,6 +3,7 @@ using EternalLandPlugin.Net;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
 using TShockAPI;
@@ -110,34 +111,72 @@ namespace EternalLandPlugin.Account
             await Task.Run(() =>
             {
                 SetPlayerActive(eplr);
-                System.Threading.Thread.Sleep(1000);
-                SetCharacter(eplr);
-                SetBag(eplr);
-
+                Thread.Sleep(1000);
                 if (eplr.IsInAnotherWorld)
                 {
-                    eplr.Map.GetAllPlayers().ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
-                    NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
+                    eplr.Map.GetAllPlayers().ForEach(e =>
+                    {
+                        if (e != eplr)
+                        {
+                            eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index);
+                            e.SendData(PacketTypes.PlayerUpdate, "", eplr.Index);
+                        }
+                    });
+                    //NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
                 }
                 else
                 {
-                    EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index); });
-                    NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
+                    EternalLand.OnlineEPlayerWhoInMainMap.ForEach(e =>
+                    {
+                        if (e != eplr)
+                        {
+                            eplr.SendData(PacketTypes.PlayerUpdate, "", e.Index);
+                            e.SendData(PacketTypes.PlayerUpdate, "", eplr.Index);
+                        }
+                    });
+                    //NetMessage.SendData(13, -1, eplr.Index, null, eplr.Index);
                 }
+                SetCharacter(eplr);
+                SetBag(eplr);
+                SetBuff(eplr);
+                Thread.Sleep(500);
+                
             });
         }
-
+        public static void SetBuff(EPlayer eplr)
+        {
+            NetMessage.SendData(50, -1, eplr.Index, null, eplr.Index);
+        }
         public static void SetBag(EPlayer eplr)
         {
-            var list = eplr.TempCharacter == null ? eplr.Character.Bag : eplr.TempCharacter.Bag;
-            for (int i = 0; i < 260; i++)
+            if (eplr.TempCharacter == new EPlayerData() || eplr.TempCharacter == null)
             {
-                var item = list[i] ?? new EItem();
-                EternalLand.OnlineEPlayer.ForEach(e =>
-                {
-                    if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData());
-                });
+                var plr = eplr.plr;
+                int i = 0;
+                    plr.inventory.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.armor.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.dye.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.miscEquips.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.miscDyes.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.bank.item.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)plr.trashItem.stack).PackByte((byte)plr.trashItem.prefix).PackInt16((short)plr.trashItem.type).GetByteData()); }); i++;
+                plr.bank2.item.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.bank3.item.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
+                    plr.bank4.item.ForEach(item => { EternalLand.OnlineEPlayer.ForEach(e => { if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData()); }); i++; });
             }
+            else
+            {
+                var list = eplr.TempCharacter.Bag;
+                for (int i = 0; i < 260; i++)
+                {
+                    var item = list[i] ?? new EItem();
+                    EternalLand.OnlineEPlayer.ForEach(e =>
+                    {
+                        if (e != eplr) e.SendRawData(new RawDataWriter().SetType(PacketTypes.PlayerSlot).PackByte((byte)eplr.Index).PackInt16((short)i).PackInt16((short)item.stack).PackByte((byte)item.prefix).PackInt16((short)item.type).GetByteData());
+                    });
+                }
+            }
+            
         }
 
         public static void SetPlayerActive(EPlayer eplr)

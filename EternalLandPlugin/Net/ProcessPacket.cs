@@ -4,6 +4,7 @@ using EternalLandPlugin.Hungr;
 using System;
 using System.IO;
 using System.IO.Streams;
+using System.Linq;
 using Terraria;
 using Terraria.DataStructures;
 using TerrariaApi.Server;
@@ -26,7 +27,7 @@ namespace EternalLandPlugin.Net
                     case PacketTypes.ItemOwner:
                         int item = reader.ReadInt16();
                         int ID = (int)reader.ReadByte();
-                        if (item == 0) StatusSender.GetPingPakcet(tsp);
+                        if (item == 0) StatusSender.GetPingPakcet(args.Msg.whoAmI);
                         break;
                     case PacketTypes.PlayerHp:
                         reader.ReadByte();
@@ -88,6 +89,7 @@ namespace EternalLandPlugin.Net
         {
             var plr = Main.player[args.Who];
             var tsp = plr.TSPlayer();
+            NetMessage.SendData(39, args.Who, -1, null, 0);
             UserAccount userAccount = TShock.UserAccounts.GetUserAccountByName(tsp.Name);
             var eplr = userAccount == null ? null : DataBase.GetEPlayer(userAccount.ID).Result;
             if (eplr != null)
@@ -98,8 +100,6 @@ namespace EternalLandPlugin.Net
                 if (eplr.Name == "咕咕咕") eplr.ChangeCharacter("y0");
                 UserManager.SetPlayerActive(eplr);
             }
-            tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
-            //tsp.SendData(PacketTypes.TileFrameSection, "", 0, 0, 1000,1000);
         }
 
         public static void PlayerLeave(LeaveEventArgs args)
@@ -109,16 +109,17 @@ namespace EternalLandPlugin.Net
             var eplr = tsp.EPlayer();
             if (eplr != null)
             {
-                tsp.EPlayer().Save();
+                eplr.Save();
                 EternalLand.EPlayers[args.Who].Dispose();
                 EternalLand.EPlayers[args.Who] = null;
                 Log.Info($"玩家 {eplr.Name} 数据已保存.");
                 if (eplr.TerritoryUUID != Guid.Empty && MapManager.GetMapFromUUID(eplr.TerritoryUUID, out var map))
                 {
-                    map.Save();
-                    map.Dispose();
-                    GameData.ActiveMap[eplr.TerritoryUUID] = null;
-                    GameData.ActiveMap.Remove(eplr.TerritoryUUID);
+                    if (map.Player.Contains(eplr.ID)) map.Player.Remove(eplr.ID);
+                    if (!map.Player.Any() && map.Save())
+                    {
+                        map.Dispose();
+                    }
                 }
             }
         }
@@ -128,6 +129,7 @@ namespace EternalLandPlugin.Net
             var account = args.Account;
             UserManager.GetTSPlayerFromName(account.Name, out var tsp);
             DataBase.AddEPlayer(account.ID, account.Name);
+            //tsp.SendData(PacketTypes.RemoveItemOwner, "", 0);
             tsp.SendSuccessEX($"注册成功! 请使用 {("/login <密码>").ToColorful()} 进行登陆.");
         }
 
@@ -137,16 +139,24 @@ namespace EternalLandPlugin.Net
             if (UserManager.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
             {
                 int lifechange = life - plr.statLife;
-                if (eplr.Life == -1)
+                if (EternalLand.IsGameMode)
                 {
-                    eplr.Life = life;
-                    return false;
+                    eplr.Statistic.Heal += lifechange;
                 }
-                if (lifechange > 0 && !eplr.tsp.GodMode)
+                else
                 {
-                    NetMessage.SendData(16, -1, -1, null, plr.whoAmI);
-                    return true;
+                    if (eplr.Life == -1)
+                    {
+                        eplr.Life = life;
+                        return false;
+                    }
+                    if (lifechange > 0 && !eplr.tsp.GodMode)
+                    {
+                        NetMessage.SendData(16, -1, -1, null, plr.whoAmI);
+                        return true;
+                    }
                 }
+
             }
             return false;
         }
@@ -156,7 +166,14 @@ namespace EternalLandPlugin.Net
             if (UserManager.TryGetEPlayeFromName(plr.name, out var eplr) && eplr.HungrValue == 0)
             {
                 AntiCheat.DataCheck.OnPlayerDamage(plr, damage);
-                eplr.Life -= damage;
+                if (EternalLand.IsGameMode)
+                {
+                    // eplr.Statistic.GetDamage += damage;
+                }
+                else
+                {
+                    eplr.Life -= damage;
+                }
             }
             return false;
         }
@@ -166,7 +183,14 @@ namespace EternalLandPlugin.Net
             var eplr = args.Player.EPlayer();
             if (eplr != null)
             {
-                eplr.DeathCount++;
+                if (EternalLand.IsGameMode)
+                {
+                    eplr.Statistic.Dead++;
+                }
+                else
+                {
+
+                }
             }
         }
 
@@ -178,19 +202,34 @@ namespace EternalLandPlugin.Net
 
         public static void NpcStrike(NpcStrikeEventArgs args)
         {
-            if (UserManager.GetTSPlayerFromName(args.Player.name, out TSPlayer tsp))
+            if (UserManager.TryGetEPlayeFromName(args.Player.name, out EPlayer eplr))
             {
-                Bank.OnStrike(args.Npc, tsp, args.Damage);
+
+                if (EternalLand.IsGameMode)
+                {
+                    eplr.Statistic.Damage_NPC += args.Damage;
+                    if (args.Critical) eplr.Statistic.CritCount++;
+                }
+                else
+                {
+                    //Bank.OnStrike(args.Npc, tsp, args.Damage);
+                }
             }
         }
 
-        public static void NpcKill(NpcKilledEventArgs args)
+        /*public static void NpcKill(NpcKilledEventArgs args)
         {
-            var npc = args.npc;
-            Bank.OnKill(args.npc);
-            if ((npc.FullName.Contains("Slime") || npc.FullName.Contains("史莱姆")) && Utils.RANDOM.Next(0, 100) > 50) Utils.DropItem((int)npc.position.X, (int)npc.position.Y, 4009);
-        }
 
-
+            if (EternalLand.IsGameMode)
+            {
+                //eplr.Statistic.Damage_NPC++;
+            }
+            else
+            {
+                var npc = args.npc;
+                Bank.OnKill(args.npc);
+                if ((npc.FullName.Contains("Slime") || npc.FullName.Contains("史莱姆")) && Utils.RANDOM.Next(0, 100) > 50) Utils.DropItem((int)npc.position.X, (int)npc.position.Y, 4009);
+            }
+        }*/
     }
 }

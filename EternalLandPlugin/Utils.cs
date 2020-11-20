@@ -6,8 +6,10 @@ using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Terraria;
+using Terraria.ID;
 using TShockAPI;
 
 namespace EternalLandPlugin
@@ -15,6 +17,11 @@ namespace EternalLandPlugin
     public class Utils
     {
         public static Random RANDOM = new Random();
+        /// <summary>
+        /// 将程序暂停一段时间(异步
+        /// </summary>
+        /// <param name="time"></param>
+        public async static void Sleep(int time) => await Task.Run(() => Thread.Sleep(time));
 
         public static List<string> BuildLinesFromTerms(IEnumerable terms, Func<object, string> termFormatter = null, string separator = ", ", int maxCharsPerLine = 80)
         {
@@ -63,6 +70,12 @@ namespace EternalLandPlugin
         public static void SendRawDataToAll(byte[] data)
         {
             EternalLand.OnlineTSPlayer.ForEach(t => t.SendRawData(data));
+        }
+        public static double GetDistance(Point startPoint, Point endPoint)
+        {
+            int x = Math.Abs(endPoint.X - startPoint.X);
+            int y = Math.Abs(endPoint.Y - startPoint.Y);
+            return Math.Sqrt(x * x + y * y);
         }
 
         #region 游戏内快捷函数
@@ -147,25 +160,40 @@ namespace EternalLandPlugin
             return tsp;
         }
 
-        public static void SendSuccessEX(this TSPlayer tsp, object text)
+        public static void SendSuccessEX(this TSPlayer tsp, object text, bool playsound = true)
         {
             tsp.SendMessage(ServerPrefix + text, new Color(120, 194, 96));
+            if (playsound) NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
         }
 
+        public static void SendInfoEX(this TSPlayer tsp, object text, bool playsound)
+        {
+            tsp.SendMessage(ServerPrefix + text, new Color(216, 212, 82));
+            if (playsound) NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
+        }
         public static void SendInfoEX(this TSPlayer tsp, object text)
         {
             tsp.SendMessage(ServerPrefix + text, new Color(216, 212, 82));
+            NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
         }
 
-        public static void SendErrorEX(this TSPlayer tsp, object text)
+        public static void SendErrorEX(this TSPlayer tsp, object text, bool playsound = true)
         {
             tsp.SendMessage(ServerPrefix + text, new Color(195, 83, 83));
+            if (playsound) NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
         }
 
+        public static void SendEX(this TSPlayer tsp, object text, bool playsound, Color color = default)
+        {
+            color = color == default ? new Color(212, 239, 245) : color;
+            tsp.SendMessage(ServerPrefix + text, color);
+            if(playsound) NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
+        }
         public static void SendEX(this TSPlayer tsp, object text, Color color = default)
         {
             color = color == default ? new Color(212, 239, 245) : color;
             tsp.SendMessage(ServerPrefix + text, color);
+            NetMessage.PlayNetSound(new NetMessage.NetSoundInfo(tsp.TPlayer.position, 122, -1, 0.62f), tsp.Index);
         }
         public static void SendMultipleError(this TSPlayer tsp, IEnumerable<object> matches)
         {
@@ -183,5 +211,6 @@ namespace EternalLandPlugin
             }
             return array;
         }
+
     }
 }

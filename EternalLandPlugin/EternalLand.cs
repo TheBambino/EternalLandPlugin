@@ -46,7 +46,7 @@ namespace EternalLandPlugin
             Main.ServerSideCharacter = true;
             ServerApi.Hooks.NetGreetPlayer.Register(this, NetProccess.PlayerJoin);
             ServerApi.Hooks.ServerLeave.Register(this, NetProccess.PlayerLeave);
-            ServerApi.Hooks.NetGetData.Register(this, NetProccess.GetData);
+           // ServerApi.Hooks.NetGetData.Register(this, NetProccess.GetData);
             ServerApi.Hooks.WorldSave.Register(this, delegate { DataBase.SaveAllEPlayer(); });
             Hooks.Game.PostUpdate += delegate (ref GameTime gameTime) { EternalLandUpdate(); };
             Hooks.Player.PreUpdate += PlayerUpdate;
@@ -56,7 +56,7 @@ namespace EternalLandPlugin
             {
                 ServerApi.Hooks.NpcSpawn.Register(this, NetProccess.NpcSpawn);
                 ServerApi.Hooks.NpcStrike.Register(this, NetProccess.NpcStrike);
-                ServerApi.Hooks.NpcKilled.Register(this, NetProccess.NpcKill);
+                //ServerApi.Hooks.NpcKilled.Register(this, NetProccess.NpcKill);
                 ServerApi.Hooks.ServerChat.Register(this, delegate (ServerChatEventArgs args) { Terraria.Chat.ChatHelper.SendChatMessageToClientAs((byte)args.Who, NetworkText.FromLiteral(args.Text), Color.White, args.Who); });
 
                 Commands.ChatCommands.Add(new Command("eternalland.bank.use", ProcessCommand.Bank, new string[]
@@ -76,14 +76,16 @@ namespace EternalLandPlugin
                 ServerApi.Hooks.NetSendBytes.Register(this, GameNet.OnSendBytes);
                 ServerApi.Hooks.NetSendData.Register(this, GameNet.OnSendData);
                 ServerApi.Hooks.NetGetData.Register(this, GameNet.OnGetData);
+                ServerApi.Hooks.ServerChat.Register(this, GameNet.OnChat);
                 GetDataHandlers.PlayerInfo += delegate (object o, GetDataHandlers.PlayerInfoEventArgs args) { if (args.Player.IsLoggedIn) args.Handled = true; args.Player.SendData(PacketTypes.PlayerInfo, "", args.Player.Index); };
                 TShockAPI.Hooks.PlayerHooks.PlayerCommand += GameCommand.OnPlayerCommand;
-                GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
+                ServerApi.Hooks.NpcStrike.Register(this, GameNet.OnNpcStrike);
+                //GetDataHandlers.NewProjectile += GameNet.OnReceiveNewProj;
                 GetDataHandlers.ProjectileKill += GameNet.OnReceiveKillProj;
                 GetDataHandlers.PlayerSpawn += GameNet.OnPlayerSpawn;
                 GetDataHandlers.SendTileSquare += delegate (object o, GetDataHandlers.SendTileSquareEventArgs args) { args.Handled = true; };
                 GetDataHandlers.ChestOpen += GameNet.OnChestOpen;
-                //GetDataHandlers.Sign += GameNet.OnUpdateSign;
+                //GetDataHandlers.DisplayDollItemSync += GameNet.OnUpdateSign;
                 GetDataHandlers.LiquidSet += GameNet.OnLiquidSet;
 
                 Commands.ChatCommands.Add(new Command("eternalland.game.admin", GameCommand.AdminCommand, new string[]
@@ -115,11 +117,12 @@ namespace EternalLandPlugin
                 {
                     while (true)
                     {
-                        Thread.Sleep(1111);
+                        Thread.Sleep(1500);
                         OnlineEPlayer.ForEach(e =>
                         {
                             NetMessage.SendData(4, -1, -1, null, e.Index);
                             UserManager.SetBag(e);
+                            UserManager.SetBuff(e);
                         });
                     }
                 })).Start();
@@ -135,8 +138,8 @@ namespace EternalLandPlugin
             TShockAPI.Hooks.AccountHooks.AccountCreate -= NetProccess.PlayerRegister;
             ServerApi.Hooks.NetGetData.Deregister(this, NetProccess.GetData);
             ServerApi.Hooks.NpcSpawn.Deregister(this, NetProccess.NpcSpawn);
-            ServerApi.Hooks.NpcStrike.Deregister(this, NetProccess.NpcStrike);
-            ServerApi.Hooks.NpcKilled.Deregister(this, NetProccess.NpcKill);
+            //ServerApi.Hooks.NpcStrike.Deregister(this, NetProccess.NpcStrike);
+            //ServerApi.Hooks.NpcKilled.Deregister(this, NetProccess.NpcKill);
             base.Dispose(disposing);
         }
 
